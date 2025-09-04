@@ -5,10 +5,10 @@ import path from "path";
 import cookieParser from "cookie-parser";
 
 import modulRoutes from "./routes/modulRoutes.js";
-import notesRoutes from "./routes/notesRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import { connectDB } from "../config/db.js";
-import rateLimiter from "../middleware/rateLimiter.js";
+import rateLimiter from "../src/middleware/rateLimiter.js";
+import authRoutes from "./routes/authRoutes.js";
 
 dotenv.config();
 
@@ -35,7 +35,6 @@ app.use(rateLimiter);
 // });
 
 app.use("/api/auth", authRoutes);
-app.use("/api/notes", notesRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/modules", modulRoutes);
 

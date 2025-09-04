@@ -1,5 +1,5 @@
 // middleware/auth.js - neue Datei
-import { verifyAccessToken } from "../utils/jwt.js";
+import { verifyAccessToken } from "../util/jwt.js";
 import User from "../models/User.js";
 
 export const authenticate = async (req, res, next) => {

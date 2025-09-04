@@ -1,4 +1,4 @@
-import Modul from "../models/modulModel.js";
+import Modul from "../models/Modul.js";
 
 export const getAllModules = async (req, res) => {
   try {

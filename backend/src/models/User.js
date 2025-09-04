@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
@@ -7,8 +8,14 @@ const userSchema = new mongoose.Schema(
     isBB: { type: Boolean, required: true },
     firstName: { type: String },
     lastName: { type: String },
-    Lehrjahr: { type: Number },
-    Berufsbilder: [
+    lehrjahr: { type: Number },
+    berufsbildner: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    assignedStudents: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
@@ -27,12 +34,12 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-userSchema.pre("save", function (next) {
+userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
   try {
     const saltRounds = 12;
-    this.password = bcrypt.hash(this.password, saltRounds);
+    this.password = await bcrypt.hash(this.password, saltRounds);
     next();
   } catch (error) {
     next(error);

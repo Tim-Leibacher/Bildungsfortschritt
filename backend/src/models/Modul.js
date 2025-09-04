@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 
-const modulSchema = new mongoose().Schema(
+const modulSchema = new mongoose.Schema(
   {
     code: {
       // z.B. A1, M106
