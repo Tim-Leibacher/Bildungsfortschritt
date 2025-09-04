@@ -2,8 +2,11 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
+import cookieParser from "cookie-parser";
 
+import modulRoutes from "./routes/modulRoutes.js";
 import notesRoutes from "./routes/notesRoutes.js";
+import userRoutes from "./routes/userRoutes.js";
 import { connectDB } from "../config/db.js";
 import rateLimiter from "../middleware/rateLimiter.js";
 
@@ -22,6 +25,7 @@ if (process.env.NODE_ENV !== "production") {
   );
 }
 app.use(express.json()); // this middleware will parse JSON bodies: req.body
+app.use(cookieParser());
 app.use(rateLimiter);
 
 // our simple custom middleware
@@ -30,7 +34,10 @@ app.use(rateLimiter);
 //   next();
 // });
 
+app.use("/api/auth", authRoutes);
 app.use("/api/notes", notesRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/modules", modulRoutes);
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "../frontend/dist")));
