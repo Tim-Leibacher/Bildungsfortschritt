@@ -18,7 +18,7 @@ const compentencySchema = new mongoose.Schema(
     area: {
       type: String,
       required: true,
-      enum: ["a", "b", "c", "d", "e", "f", "g", "f"],
+      enum: ["a", "b", "c", "d", "e", "f", "g", "h"],
     },
     taxonomy: {
       type: String,
