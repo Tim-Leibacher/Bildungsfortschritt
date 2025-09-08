@@ -1,103 +1,75 @@
 import React, { useState } from "react";
 import {
-  CheckCircleIcon,
-  CircleIcon,
   BookOpenIcon,
   ClockIcon,
+  CheckCircleIcon,
+  CircleIcon,
   CalendarIcon,
 } from "lucide-react";
-import { toast } from "react-hot-toast";
 
-const ModuleCard = ({
-  module,
-  isCompleted,
-  completedAt,
-  onToggleComplete,
-  canEdit = true,
-}) => {
+const ModuleCard = ({ module, onToggleComplete, readonly = false }) => {
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleToggle = async () => {
-    if (!canEdit) return;
+  const isCompleted = module.completed || false;
+  const completedAt = module.completedAt;
+
+  const handleToggleComplete = async () => {
+    if (readonly || isLoading) return;
 
     setIsLoading(true);
     try {
       await onToggleComplete(module._id, isCompleted);
-      toast.success(
-        isCompleted
-          ? "Modul als nicht abgeschlossen markiert"
-          : "Modul als abgeschlossen markiert"
-      );
     } catch (error) {
       console.error("Error toggling module completion:", error);
-      toast.error("Fehler beim Aktualisieren des Moduls");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const getTypeColor = (type) => {
-    switch (type) {
-      case "BFS":
-        return "badge-primary";
-      case "BAND":
-        return "badge-secondary";
-      case "ÜK":
-        return "badge-accent";
-      default:
-        return "badge-neutral";
-    }
-  };
-
   const getTypeName = (type) => {
     switch (type) {
-      case "BFS":
-        return "Berufsfachschule";
-      case "BAND":
-        return "Betrieb";
-      case "ÜK":
-        return "Überbetrieblicher Kurs";
+      case "bfs":
+        return "BFS";
+      case "band":
+        return "BAND";
+      case "uk":
+        return "ÜK";
       default:
-        return type;
+        return type || "Unbekannt";
     }
   };
 
   const formatDate = (dateString) => {
-    if (!dateString) return null;
+    if (!dateString) return "";
     return new Date(dateString).toLocaleDateString("de-DE", {
       year: "numeric",
-      month: "short",
+      month: "long",
       day: "numeric",
     });
   };
 
   return (
-    <div
-      className={`card bg-base-100 shadow-md hover:shadow-lg transition-all duration-200 ${
-        isCompleted ? "border-l-4 border-success" : "border-l-4 border-base-300"
-      }`}
-    >
-      <div className="card-body p-6">
+    <div className="card bg-base-100 shadow-sm hover:shadow-md transition-shadow">
+      <div className="card-body">
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-2">
-              <h3 className="card-title text-lg font-bold text-base-content">
+              <h3 className="card-title text-lg font-semibold">
                 {module.code}
               </h3>
-              <div className={`badge ${getTypeColor(module.type)} badge-sm`}>
-                {module.type}
-              </div>
+              <span className="badge badge-outline badge-sm">
+                {getTypeName(module.type)}
+              </span>
             </div>
-            <h4 className="text-base font-medium text-base-content/80 mb-2">
+            <h4 className="font-medium text-base-content mb-2">
               {module.title}
             </h4>
           </div>
 
-          {canEdit && (
+          {!readonly && (
             <button
-              onClick={handleToggle}
-              disabled={isLoading}
+              onClick={handleToggleComplete}
               className={`btn btn-sm ${
                 isCompleted ? "btn-success" : "btn-outline btn-neutral"
               } ${isLoading ? "loading" : ""}`}

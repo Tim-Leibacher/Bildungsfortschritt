@@ -1,6 +1,6 @@
 import { BookOpenIcon, UserIcon } from "lucide-react";
 import React from "react";
-import { Link } from "react-router";
+import { Link } from "react-router-dom";
 
 const Navbar = ({ user, onLogout }) => {
   return (
