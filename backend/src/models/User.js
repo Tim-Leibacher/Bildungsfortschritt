@@ -1,3 +1,4 @@
+// backend/src/models/User.js
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
@@ -25,7 +26,7 @@ const userSchema = new mongoose.Schema(
       {
         module: {
           type: mongoose.Schema.Types.ObjectId,
-          ref: "Module",
+          ref: "Modul",
         },
         completedAt: { type: Date, default: Date.now },
       },

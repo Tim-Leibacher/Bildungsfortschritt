@@ -1,5 +1,9 @@
 import User from "../models/User.js";
-import { generateAccessToken } from "../util/jwt.js";
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+} from "../util/jwt.js";
 
 export const register = async (req, res) => {
   try {
@@ -19,7 +23,7 @@ export const register = async (req, res) => {
     });
     await user.save();
 
-    const accesToken = generateAccessToken(user._id);
+    const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
     res.cookie("refreshToken", refreshToken, {
@@ -28,16 +32,16 @@ export const register = async (req, res) => {
       sameSite: "Strict",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Tage
     });
-    const userRespone = user.toObject();
-    delete userRespone.password;
-    res.status(201).json({
-      user: userRespone,
-      accesToken,
-    });
 
-    return res.status(201).json({ message: "User registered successfully" });
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({
+      user: userResponse,
+      accessToken,
+    });
   } catch (error) {
-    console.error(error);
+    console.error("Registration error:", error);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
