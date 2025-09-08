@@ -1,4 +1,4 @@
-import Compentency from "../models/Compentency.js";
+import Compentency from "../models/Competency.js";
 
 export const getAllCompentencies = async (req, res) => {
   try {

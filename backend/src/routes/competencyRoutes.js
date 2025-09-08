@@ -3,7 +3,7 @@ import {
   getAllCompentencies,
   getCompetenciesByArea,
   createCompetency,
-} from "../controllers/compentencyController.js";
+} from "../controllers/competencyController.js";
 import { authenticate, authorize } from "../middleware/auth.js";
 
 const router = express.Router();

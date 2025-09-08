@@ -63,30 +63,26 @@ const ModulesPage = ({ user, onLogout }) => {
   }, [modules, searchTerm, selectedType, showCompleted]);
 
   const handleToggleComplete = async (moduleId, isCurrentlyCompleted) => {
-    try {
-      if (isCurrentlyCompleted) {
-        await userAPI.unmarkModuleAsCompleted(moduleId);
-      } else {
-        await userAPI.markModuleAsCompleted(moduleId);
-      }
-
-      // Update local state
-      setModules((prevModules) =>
-        prevModules.map((module) =>
-          module._id === moduleId
-            ? {
-                ...module,
-                completed: !isCurrentlyCompleted,
-                completedAt: !isCurrentlyCompleted
-                  ? new Date().toISOString()
-                  : null,
-              }
-            : module
-        )
-      );
-    } catch (error) {
-      throw error; // Let ModuleCard handle the error display
+    if (isCurrentlyCompleted) {
+      await userAPI.unmarkModuleAsCompleted(moduleId);
+    } else {
+      await userAPI.markModuleAsCompleted(moduleId);
     }
+
+    // Update local state
+    setModules((prevModules) =>
+      prevModules.map((module) =>
+        module._id === moduleId
+          ? {
+              ...module,
+              completed: !isCurrentlyCompleted,
+              completedAt: !isCurrentlyCompleted
+                ? new Date().toISOString()
+                : null,
+            }
+          : module
+      )
+    );
   };
 
   const getCompletionStats = () => {

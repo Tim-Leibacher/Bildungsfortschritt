@@ -12,7 +12,7 @@ const __dirname = dirname(__filename);
 dotenv.config({ path: join(__dirname, "../../.env") });
 
 import User from "../models/User.js";
-import Competency from "../models/Compentency.js";
+import Competency from "../models/Competency.js";
 import Modul from "../models/Modul.js";
 import { connectDB } from "../../config/db.js";
 

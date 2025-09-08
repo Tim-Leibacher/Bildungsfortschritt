@@ -1,6 +1,6 @@
 import User from "../models/User.js";
 import Modul from "../models/Modul.js";
-import Competency from "../models/Compentency.js";
+import Competency from "../models/Competency.js";
 
 export const getAllUsers = async (_, res) => {
   try {
