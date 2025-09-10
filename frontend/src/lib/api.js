@@ -43,6 +43,14 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // DON'T try to refresh token for login/register requests
+    if (
+      originalRequest.url?.includes("/auth/login") ||
+      originalRequest.url?.includes("/auth/register")
+    ) {
+      return Promise.reject(error);
+    }
+
     // Only handle 401 errors and prevent infinite loops
     if (error.response?.status === 401 && !originalRequest._retry) {
       if (isRefreshing) {

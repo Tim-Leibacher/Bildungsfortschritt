@@ -46,8 +46,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials) => {
     try {
-      setLoading(true); // Zeige Loading während Login
-
+      // Don't show global loading for login attempts
       const response = await authAPI.login(credentials);
       const { user: userData, accessToken } = response.data;
 
@@ -77,9 +76,8 @@ export const AuthProvider = ({ children }) => {
       }
 
       return { success: false, error: errorMessage };
-    } finally {
-      setLoading(false);
     }
+    // No finally block - don't change loading state during login
   };
 
   const register = async (userData) => {

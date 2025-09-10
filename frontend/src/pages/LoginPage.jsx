@@ -15,8 +15,9 @@ const LoginPage = () => {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
-  const { login, loading } = useAuth();
+  const { login } = useAuth();
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -37,6 +38,8 @@ const LoginPage = () => {
       return;
     }
 
+    setIsLoading(true);
+
     try {
       const result = await login(formData);
 
@@ -50,6 +53,8 @@ const LoginPage = () => {
       const errorMsg = "Ein unerwarteter Fehler ist aufgetreten";
       setError(errorMsg);
       toast.error(errorMsg);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -90,7 +95,7 @@ const LoginPage = () => {
                 }`}
                 value={formData.email}
                 onChange={handleInputChange}
-                disabled={loading}
+                disabled={isLoading}
                 required
               />
             </div>
@@ -109,14 +114,14 @@ const LoginPage = () => {
                   }`}
                   value={formData.password}
                   onChange={handleInputChange}
-                  disabled={loading}
+                  disabled={isLoading}
                   required
                 />
                 <button
                   type="button"
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/50 hover:text-base-content"
                   onClick={() => setShowPassword(!showPassword)}
-                  disabled={loading}
+                  disabled={isLoading}
                 >
                   {showPassword ? (
                     <EyeOffIcon className="h-5 w-5" />
@@ -130,9 +135,9 @@ const LoginPage = () => {
             <button
               type="submit"
               className="btn btn-primary w-full"
-              disabled={loading || !formData.email || !formData.password}
+              disabled={isLoading || !formData.email || !formData.password}
             >
-              {loading ? (
+              {isLoading ? (
                 <>
                   <span className="loading loading-spinner loading-sm"></span>
                   Anmelden...
@@ -154,8 +159,25 @@ const LoginPage = () => {
               Systemadministrator.
             </p>
           </div>
+
+          {/* Debug Info (nur in Development) */}
+          {process.env.NODE_ENV === "development" && (
+            <div className="mt-6 p-4 bg-base-200 rounded-lg">
+              <h4 className="text-sm font-semibold mb-2">Test-Credentials:</h4>
+              <div className="text-xs space-y-1">
+                <p>
+                  <strong>Berufsbildner:</strong> bb@example.com / password123
+                </p>
+                <p>
+                  <strong>Student:</strong> student@example.com / password123
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
+
+export default LoginPage;
