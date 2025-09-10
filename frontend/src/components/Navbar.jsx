@@ -1,8 +1,38 @@
 import { BookOpenIcon, UserIcon } from "lucide-react";
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 const Navbar = ({ user, onLogout }) => {
+  const location = useLocation();
+
+  // Bestimme Button-Text und Route basierend auf aktueller Seite
+  const getNavigationConfig = () => {
+    const isOnModulesPage = location.pathname === "/modules";
+
+    if (isOnModulesPage) {
+      // Auf Module-Seite → zurück zu Dashboard/Detailansicht
+      if (user.isBB) {
+        return {
+          route: "/dashboard",
+          text: "Meine Lernenden",
+        };
+      } else {
+        return {
+          route: `/student/${user._id}`, // oder "/dashboard" wenn Lernende auf Dashboard bleiben sollen
+          text: "Meine Ansicht",
+        };
+      }
+    } else {
+      // Auf Dashboard/Student-Seite → zu Modulen
+      return {
+        route: "/modules",
+        text: "Module",
+      };
+    }
+  };
+
+  const navConfig = getNavigationConfig();
+
   return (
     <header className="bg-base-300 border-b border-base-content/10">
       <div className="mx-auto max-w-6xl p-4">
@@ -14,12 +44,13 @@ const Navbar = ({ user, onLogout }) => {
             Bildungsfortschritt
           </Link>
           <div className="flex items-center gap-4">
-            <Link to="/modules" className="btn btn-primary">
+            <Link to={navConfig.route} className="btn btn-primary">
               <BookOpenIcon className="size-5" />
-              <span>Module</span>
+              <span>{navConfig.text}</span>
             </Link>
             {user && (
               <div className="dropdown dropdown-end">
+                {/* Rest des bestehenden User-Dropdown Codes... */}
                 <div
                   tabIndex={0}
                   role="button"
@@ -62,5 +93,4 @@ const Navbar = ({ user, onLogout }) => {
     </header>
   );
 };
-
 export default Navbar;
