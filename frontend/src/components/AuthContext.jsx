@@ -46,6 +46,8 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (credentials) => {
     try {
+      setLoading(true); // Zeige Loading während Login
+
       const response = await authAPI.login(credentials);
       const { user: userData, accessToken } = response.data;
 
@@ -60,17 +62,30 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Login error:", error);
 
-      const errorMessage =
-        error.response?.data?.message ||
-        error.message ||
-        "Ein Fehler ist beim Anmelden aufgetreten";
+      // Spezifische Fehlermeldungen für verschiedene Szenarien
+      let errorMessage = "Ein Fehler ist beim Anmelden aufgetreten";
+
+      if (error.response?.status === 401) {
+        errorMessage = "Ungültige E-Mail-Adresse oder Passwort";
+      } else if (error.response?.status === 429) {
+        errorMessage =
+          "Zu viele Login-Versuche. Bitte warten Sie einen Moment.";
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
 
       return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const register = async (userData) => {
     try {
+      setLoading(true);
+
       const response = await authAPI.register(userData);
       const { user: newUser, accessToken } = response.data;
 
@@ -91,11 +106,15 @@ export const AuthProvider = ({ children }) => {
         "Ein Fehler ist bei der Registrierung aufgetreten";
 
       return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
     try {
+      setLoading(true);
+
       // Call logout endpoint to invalidate refresh token
       await authAPI.logout();
     } catch (error) {
@@ -106,6 +125,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.removeItem("accessToken");
       setUser(null);
       setIsAuthenticated(false);
+      setLoading(false);
     }
   };
 

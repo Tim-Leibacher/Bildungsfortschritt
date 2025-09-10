@@ -6,6 +6,23 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Variable to track refresh attempts and prevent loops
+let isRefreshing = false;
+let failedQueue = [];
+
+// Helper function to process failed requests queue
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(({ resolve, reject }) => {
+    if (error) {
+      reject(error);
+    } else {
+      resolve(token);
+    }
+  });
+
+  failedQueue = [];
+};
+
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
@@ -24,22 +41,56 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    if (error.response?.status === 401) {
-      // Try to refresh token
+    const originalRequest = error.config;
+
+    // Only handle 401 errors and prevent infinite loops
+    if (error.response?.status === 401 && !originalRequest._retry) {
+      if (isRefreshing) {
+        // If already refreshing, queue this request
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        })
+          .then((token) => {
+            originalRequest.headers.Authorization = `Bearer ${token}`;
+            return api(originalRequest);
+          })
+          .catch((err) => {
+            return Promise.reject(err);
+          });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
       try {
         const response = await api.post("/auth/refresh");
         const newToken = response.data.accessToken;
+
+        // Update token in localStorage
         localStorage.setItem("accessToken", newToken);
 
+        // Process the failed queue
+        processQueue(null, newToken);
+
         // Retry original request
-        error.config.headers.Authorization = `Bearer ${newToken}`;
-        return api.request(error.config);
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return api(originalRequest);
       } catch (refreshError) {
-        // Redirect to login if refresh fails
+        // Refresh failed - clear everything and redirect
+        processQueue(refreshError, null);
         localStorage.removeItem("accessToken");
-        window.location.href = "/login";
+
+        // Only redirect if we're not already on login page
+        if (window.location.pathname !== "/login") {
+          window.location.href = "/login";
+        }
+
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
       }
     }
+
     return Promise.reject(error);
   }
 );
@@ -55,7 +106,7 @@ export const authAPI = {
 // User API
 export const userAPI = {
   getCurrentUser: () => api.get("/user/me"),
-  getAssignedStudents: () => api.get("/user/bb/users"), // For Berufsbildner
+  getAssignedStudents: () => api.get("/user/bb/users"),
   getUserProgress: (userId) => api.get(`/user/progress/${userId || ""}`),
   markModuleAsCompleted: (moduleId) =>
     api.post("/user/complete-module", { moduleId }),

@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import { toast } from "react-hot-toast";
-import { EyeIcon, EyeOffIcon, LogInIcon } from "lucide-react";
+import {
+  EyeIcon,
+  EyeOffIcon,
+  LogInIcon,
+  AlertTriangleIcon,
+} from "lucide-react";
 import { useAuth } from "../components/AuthContext";
 
 const LoginPage = () => {
@@ -9,9 +14,9 @@ const LoginPage = () => {
     password: "",
   });
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const { login } = useAuth();
+  const { login, loading } = useAuth();
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -19,17 +24,18 @@ const LoginPage = () => {
       ...prev,
       [name]: value,
     }));
+    // Clear error when user starts typing
+    if (error) setError("");
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
 
     if (!formData.email || !formData.password) {
-      toast.error("Bitte füllen Sie alle Felder aus");
+      setError("Bitte füllen Sie alle Felder aus");
       return;
     }
-
-    setIsLoading(true);
 
     try {
       const result = await login(formData);
@@ -37,12 +43,13 @@ const LoginPage = () => {
       if (result.success) {
         toast.success(`Willkommen zurück, ${result.user.firstName}!`);
       } else {
+        setError(result.error);
         toast.error(result.error);
       }
     } catch (error) {
-      toast.error("Ein unerwarteter Fehler ist aufgetreten");
-    } finally {
-      setIsLoading(false);
+      const errorMsg = "Ein unerwarteter Fehler ist aufgetreten";
+      setError(errorMsg);
+      toast.error(errorMsg);
     }
   };
 
@@ -60,6 +67,14 @@ const LoginPage = () => {
             </p>
           </div>
 
+          {/* Error Alert */}
+          {error && (
+            <div className="alert alert-error mb-4">
+              <AlertTriangleIcon className="h-4 w-4" />
+              <span className="text-sm">{error}</span>
+            </div>
+          )}
+
           {/* Login Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="form-control">
@@ -70,9 +85,12 @@ const LoginPage = () => {
                 type="email"
                 name="email"
                 placeholder="ihre.email@beispiel.com"
-                className="input input-bordered w-full"
+                className={`input input-bordered w-full ${
+                  error && !formData.email ? "input-error" : ""
+                }`}
                 value={formData.email}
                 onChange={handleInputChange}
+                disabled={loading}
                 required
               />
             </div>
@@ -86,61 +104,54 @@ const LoginPage = () => {
                   type={showPassword ? "text" : "password"}
                   name="password"
                   placeholder="Ihr Passwort"
-                  className="input input-bordered w-full pr-12"
+                  className={`input input-bordered w-full pr-12 ${
+                    error && !formData.password ? "input-error" : ""
+                  }`}
                   value={formData.password}
                   onChange={handleInputChange}
+                  disabled={loading}
                   required
                 />
                 <button
                   type="button"
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 btn btn-ghost btn-sm"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/50 hover:text-base-content"
                   onClick={() => setShowPassword(!showPassword)}
+                  disabled={loading}
                 >
                   {showPassword ? (
-                    <EyeOffIcon className="size-4" />
+                    <EyeOffIcon className="h-5 w-5" />
                   ) : (
-                    <EyeIcon className="size-4" />
+                    <EyeIcon className="h-5 w-5" />
                   )}
                 </button>
               </div>
             </div>
 
-            <div className="form-control mt-6">
-              <button
-                type="submit"
-                className={`btn btn-primary w-full ${
-                  isLoading ? "loading" : ""
-                }`}
-                disabled={isLoading}
-              >
-                {!isLoading && <LogInIcon className="size-5" />}
-                {isLoading ? "Anmeldung läuft..." : "Anmelden"}
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="btn btn-primary w-full"
+              disabled={loading || !formData.email || !formData.password}
+            >
+              {loading ? (
+                <>
+                  <span className="loading loading-spinner loading-sm"></span>
+                  Anmelden...
+                </>
+              ) : (
+                <>
+                  <LogInIcon className="h-4 w-4" />
+                  Anmelden
+                </>
+              )}
+            </button>
           </form>
 
-          {/* Demo Accounts Info */}
-          <div className="divider">Demo-Accounts</div>
-          <div className="text-sm text-base-content/70 space-y-2">
-            <div className="card bg-base-200 p-3">
-              <div className="font-medium">Berufsbildner:</div>
-              <div>Email: bb@example.com</div>
-              <div>Passwort: password123</div>
-            </div>
-            <div className="card bg-base-200 p-3">
-              <div className="font-medium">Lernender:</div>
-              <div>Email: lernender@example.com</div>
-              <div>Passwort: password123</div>
-            </div>
-          </div>
-
           {/* Footer */}
-          <div className="text-center mt-6">
-            <p className="text-sm text-base-content/60">
-              Noch kein Account?{" "}
-              <a href="/register" className="link link-primary">
-                Registrieren
-              </a>
+          <div className="text-center mt-6 text-sm text-base-content/70">
+            <p>
+              Bei Problemen wenden Sie sich an Ihren
+              <br />
+              Systemadministrator.
             </p>
           </div>
         </div>
@@ -148,5 +159,3 @@ const LoginPage = () => {
     </div>
   );
 };
-
-export default LoginPage;

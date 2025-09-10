@@ -91,17 +91,21 @@ export const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({
         message: "E-Mail und Passwort sind erforderlich",
+        code: "MISSING_CREDENTIALS",
       });
     }
 
-    // Normalisiere E-Mail
-    email = normalizeGermanEmail(email);
+    // Normalisiere E-Mail (falls diese Funktion existiert)
+    if (typeof normalizeGermanEmail === "function") {
+      email = normalizeGermanEmail(email);
+    }
 
     // User finden (case-insensitive)
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(401).json({
         message: "Ungültige E-Mail-Adresse oder Passwort",
+        code: "INVALID_CREDENTIALS",
       });
     }
 
@@ -110,6 +114,7 @@ export const login = async (req, res) => {
     if (!isValidPassword) {
       return res.status(401).json({
         message: "Ungültige E-Mail-Adresse oder Passwort",
+        code: "INVALID_CREDENTIALS",
       });
     }
 
@@ -137,6 +142,7 @@ export const login = async (req, res) => {
     console.error("Login-Fehler:", error);
     res.status(500).json({
       message: "Interner Serverfehler beim Login",
+      code: "INTERNAL_SERVER_ERROR",
     });
   }
 };
@@ -146,8 +152,16 @@ export const refreshToken = async (req, res) => {
     const refreshToken = req.cookies.refreshToken;
 
     if (!refreshToken) {
+      // Wichtig: Cookie explizit löschen wenn kein Token vorhanden
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+      });
+
       return res.status(401).json({
         message: "Refresh Token fehlt",
+        code: "NO_REFRESH_TOKEN",
       });
     }
 
@@ -156,8 +170,16 @@ export const refreshToken = async (req, res) => {
     const user = await User.findById(decoded.userId);
 
     if (!user) {
+      // Cookie löschen bei ungültigem User
+      res.clearCookie("refreshToken", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+      });
+
       return res.status(401).json({
         message: "Benutzer nicht gefunden",
+        code: "USER_NOT_FOUND",
       });
     }
 
@@ -171,11 +193,28 @@ export const refreshToken = async (req, res) => {
   } catch (error) {
     console.error("Refresh Token Fehler:", error);
 
-    // Cookie löschen bei ungültigem Token
-    res.clearCookie("refreshToken");
+    // Cookie löschen bei JEDEM Fehler
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+    });
+
+    // Spezifische Error Codes für besseres Debugging
+    let errorCode = "INVALID_REFRESH_TOKEN";
+    let errorMessage = "Ungültiger oder abgelaufener Refresh Token";
+
+    if (error.name === "TokenExpiredError") {
+      errorCode = "REFRESH_TOKEN_EXPIRED";
+      errorMessage = "Refresh Token ist abgelaufen";
+    } else if (error.name === "JsonWebTokenError") {
+      errorCode = "INVALID_REFRESH_TOKEN";
+      errorMessage = "Ungültiger Refresh Token";
+    }
 
     res.status(401).json({
-      message: "Ungültiger oder abgelaufener Refresh Token",
+      message: errorMessage,
+      code: errorCode,
     });
   }
 };
