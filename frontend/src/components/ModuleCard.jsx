@@ -16,9 +16,10 @@ const ModuleCard = ({
   isCompleted,
   completedAt,
   onToggleComplete,
-  isLoading,
+  canEdit = true,
 }) => {
   const [showDetails, setShowDetails] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const getTypeName = (type) => {
     const types = {
@@ -64,6 +65,21 @@ const ModuleCard = ({
     if (competencyCount <= 6) return 3;
     if (competencyCount <= 8) return 4;
     return 5;
+  };
+
+  // ✅ Korrigierte handleToggleClick Funktion
+  const handleToggleClick = async () => {
+    if (!onToggleComplete || !canEdit) return;
+
+    setIsLoading(true);
+    try {
+      // Call parent function and wait for completion
+      await onToggleComplete(module._id);
+    } catch (error) {
+      console.error("Error in ModuleCard toggle:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -232,9 +248,9 @@ const ModuleCard = ({
             </button>
 
             {/* Complete Toggle */}
-            {onToggleComplete && (
+            {canEdit && onToggleComplete && (
               <button
-                onClick={() => onToggleComplete(module._id)}
+                onClick={handleToggleClick}
                 disabled={isLoading}
                 className={`btn btn-sm gap-2 transition-all duration-300 ${
                   isCompleted ? "btn-success" : "btn-outline hover:btn-primary"

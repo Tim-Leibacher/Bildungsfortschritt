@@ -63,26 +63,48 @@ const ModulesPage = ({ user, onLogout }) => {
   }, [modules, searchTerm, selectedType, showCompleted]);
 
   const handleToggleComplete = async (moduleId, isCurrentlyCompleted) => {
-    if (isCurrentlyCompleted) {
-      await userAPI.unmarkModuleAsCompleted(moduleId);
-    } else {
-      await userAPI.markModuleAsCompleted(moduleId);
-    }
+    try {
+      // Show loading state
+      toast.loading(
+        isCurrentlyCompleted
+          ? "Modul wird als nicht abgeschlossen markiert..."
+          : "Modul wird als abgeschlossen markiert...",
+        { id: `toggle-${moduleId}` }
+      );
 
-    // Update local state
-    setModules((prevModules) =>
-      prevModules.map((module) =>
-        module._id === moduleId
-          ? {
-              ...module,
-              completed: !isCurrentlyCompleted,
-              completedAt: !isCurrentlyCompleted
-                ? new Date().toISOString()
-                : null,
-            }
-          : module
-      )
-    );
+      if (isCurrentlyCompleted) {
+        await userAPI.unmarkModuleAsCompleted(moduleId);
+        toast.success("Modul erfolgreich als nicht abgeschlossen markiert", {
+          id: `toggle-${moduleId}`,
+        });
+      } else {
+        await userAPI.markModuleAsCompleted(moduleId);
+        toast.success("Modul erfolgreich als abgeschlossen markiert", {
+          id: `toggle-${moduleId}`,
+        });
+      }
+
+      // Update local state after successful API call
+      setModules((prevModules) =>
+        prevModules.map((module) =>
+          module._id === moduleId
+            ? {
+                ...module,
+                completed: !isCurrentlyCompleted,
+                completedAt: !isCurrentlyCompleted
+                  ? new Date().toISOString()
+                  : null,
+              }
+            : module
+        )
+      );
+    } catch (error) {
+      console.error("Error toggling module completion:", error);
+      toast.error(
+        error.response?.data?.message || "Fehler beim Ändern des Modul-Status",
+        { id: `toggle-${moduleId}` }
+      );
+    }
   };
 
   const getCompletionStats = () => {
@@ -249,8 +271,10 @@ const ModulesPage = ({ user, onLogout }) => {
                 module={module}
                 isCompleted={module.completed}
                 completedAt={module.completedAt}
-                onToggleComplete={handleToggleComplete}
-                canEdit={!user.isBB} // Only students can mark modules as completed
+                onToggleComplete={(moduleId) =>
+                  handleToggleComplete(moduleId, module.completed)
+                } // ✅ Korrigiert
+                canEdit={!user.isBB}
               />
             ))}
           </div>
