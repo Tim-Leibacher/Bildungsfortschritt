@@ -546,16 +546,4 @@ if (import.meta.env.DEV) {
 export default api;
 
 // Named Exports: Alle APIs und Utilities
-export {
-  API_CONFIG,
-  TokenManager,
-  RequestQueue,
-  authAPI,
-  userAPI,
-  moduleAPI,
-  competencyAPI,
-  healthAPI,
-  apiHelper,
-  tokenUtils,
-  errorHandler,
-};
+export { API_CONFIG, TokenManager, RequestQueue };
