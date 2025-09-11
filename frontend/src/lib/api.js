@@ -1,4 +1,5 @@
 import axios from "axios";
+// ENTFERNT: Ungültiger Backend-Import
 
 // ========================================
 // CONFIGURATION & CONSTANTS
@@ -393,24 +394,40 @@ export const moduleAPI = {
 };
 
 /**
- * Competency API - Verbessert mit Validierung
+ * Competency API - Vollständig korrigiert
  */
 export const competencyAPI = {
+  // Grundlegende Funktionen
   getAllCompetencies: createRetryFunction(() => api.get("/competencies")),
+
   getCompetency: createRetryFunction((competencyId) => {
     if (!competencyId) {
       throw new Error("Competency ID is required");
     }
     return api.get(`/competencies/${competencyId}`);
   }),
+
+  // Neue Funktionen für Leistungsziele-Übersicht
+  getCompetencyOverview: createRetryFunction(() => {
+    return api.get("/competencies/overview");
+  }),
+
   getCompetenciesByArea: createRetryFunction((area) => {
     if (!area) {
       throw new Error("Area parameter is required");
     }
-    return api.get(`/competencies/area/${area}`);
+    return api.get(`/competencies/area/${area.toLowerCase()}`);
   }),
 
-  // Progress Tracking
+  searchCompetencies: createRetryFunction((query) => {
+    if (!query || query.trim().length < 2) {
+      throw new Error("Search query must be at least 2 characters");
+    }
+    return api.get("/competencies/search", {
+      params: { q: query.trim() },
+    });
+  }),
+
   getCompetencyProgress: createRetryFunction((competencyId, userId) => {
     if (!competencyId) {
       throw new Error("Competency ID is required");
@@ -418,6 +435,156 @@ export const competencyAPI = {
     const params = userId ? `?userId=${userId}` : "";
     return api.get(`/competencies/${competencyId}/progress${params}`);
   }),
+};
+
+/**
+ * Helper-Funktionen für Leistungsziele
+ */
+export const competencyHelpers = {
+  /**
+   * Formatiert Handlungskompetenzbereich für Anzeige
+   * @param {string} area - Bereich (a-h)
+   * @returns {Object} Formatierte Bereichsinformationen
+   */
+  formatArea: (area) => {
+    const areaMap = {
+      a: {
+        code: "A",
+        title: "Begleiten von ICT-Projekten",
+        description: "Projektmanagement und Stakeholder-Betreuung",
+        color: "primary",
+      },
+      b: {
+        code: "B",
+        title: "Betreiben und Erweitern von ICT-Lösungen",
+        description: "Support und Wartung von ICT-Systemen",
+        color: "secondary",
+      },
+      c: {
+        code: "C",
+        title: "Aufbauen und Pflegen von digitalen Daten",
+        description: "Datenmanagement und Datenbankentwicklung",
+        color: "accent",
+      },
+      d: {
+        code: "D",
+        title: "Gewährleisten der Informationssicherheit",
+        description: "Sicherheitskonzepte und Datenschutz",
+        color: "warning",
+      },
+      e: {
+        code: "E",
+        title: "Entwickeln und Bereitstellen von ICT-Lösungen",
+        description: "Software-Entwicklung und Deployment",
+        color: "info",
+      },
+      f: {
+        code: "F",
+        title: "Definieren und Implementieren von ICT-Prozessen",
+        description: "Prozessoptimierung und Automatisierung",
+        color: "success",
+      },
+      g: {
+        code: "G",
+        title: "Entwickeln von Applikationen",
+        description: "Fachrichtung: Applikationsentwicklung",
+        color: "primary",
+      },
+      h: {
+        code: "H",
+        title: "Ausliefern und Betreiben von Applikationen",
+        description: "Fachrichtung: DevOps und Betrieb",
+        color: "secondary",
+      },
+    };
+
+    return (
+      areaMap[area.toLowerCase()] || {
+        code: area.toUpperCase(),
+        title: `Handlungskompetenzbereich ${area.toUpperCase()}`,
+        description: "Unbekannter Bereich",
+        color: "neutral",
+      }
+    );
+  },
+
+  /**
+   * Formatiert Taxonomiestufe für Anzeige
+   * @param {string} taxonomy - Taxonomiestufe (K1-K6)
+   * @returns {Object} Formatierte Taxonomie-Informationen
+   */
+  formatTaxonomy: (taxonomy) => {
+    const taxonomyMap = {
+      K1: {
+        level: 1,
+        title: "Wissen",
+        description: "Wiedergeben und Erinnern",
+      },
+      K2: {
+        level: 2,
+        title: "Verstehen",
+        description: "Verstehen und Erklären",
+      },
+      K3: {
+        level: 3,
+        title: "Anwenden",
+        description: "Anwenden und Ausführen",
+      },
+      K4: {
+        level: 4,
+        title: "Analysieren",
+        description: "Analysieren und Beurteilen",
+      },
+      K5: {
+        level: 5,
+        title: "Synthetisieren",
+        description: "Entwickeln und Konzipieren",
+      },
+      K6: {
+        level: 6,
+        title: "Evaluieren",
+        description: "Bewerten und Entscheiden",
+      },
+    };
+
+    return (
+      taxonomyMap[taxonomy] || {
+        level: 0,
+        title: taxonomy,
+        description: "Unbekannte Taxonomiestufe",
+      }
+    );
+  },
+
+  /**
+   * Berechnet Abdeckungsstatistiken
+   * @param {Array} competencies - Array von Leistungszielen
+   * @returns {Object} Statistiken
+   */
+  calculateCoverageStats: (competencies) => {
+    const total = competencies.length;
+    const covered = competencies.filter((c) => c.isCovered).length;
+    const uncovered = total - covered;
+    const percentage = total > 0 ? Math.round((covered / total) * 100) : 0;
+
+    return { total, covered, uncovered, percentage };
+  },
+
+  /**
+   * Gruppiert Leistungsziele nach Bereich
+   * @param {Array} competencies - Array von Leistungszielen
+   * @returns {Object} Nach Bereichen gruppierte Leistungsziele
+   */
+  groupByArea: (competencies) => {
+    return competencies.reduce((groups, competency) => {
+      const area = competency.area.toUpperCase();
+      if (!groups[area]) {
+        groups[area] = [];
+      }
+      groups[area].push(competency);
+      return groups;
+    }, {});
+  },
 };
 
 // ========================================

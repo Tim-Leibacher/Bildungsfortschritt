@@ -6,6 +6,7 @@ import LoginPage from "./pages/LoginPage.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import ModulesPage from "./pages/ModulesPage.jsx";
 import StudentDetailPage from "./pages/StudentDetailPage.jsx";
+import CompetencyOverviewPage from "./pages/CompetencyOverviewPage.jsx";
 
 // Protected Route Wrapper
 const ProtectedRoute = ({ children }) => {
@@ -60,7 +61,6 @@ const App = () => {
             </PublicRoute>
           }
         />
-
         {/* Protected Bildungsfortschritt Routes */}
         <Route
           path="/dashboard"
@@ -70,7 +70,6 @@ const App = () => {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/modules"
           element={
@@ -79,7 +78,6 @@ const App = () => {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/student/:studentId"
           element={
@@ -88,7 +86,15 @@ const App = () => {
             </ProtectedRoute>
           }
         />
-
+        // In Ihrem bestehenden App.jsx, fügen Sie diese Route hinzu:
+        <Route
+          path="/competency-overview"
+          element={
+            <ProtectedRoute>
+              <CompetencyOverviewPage user={user} onLogout={logout} />
+            </ProtectedRoute>
+          }
+        />
         {/* Root route */}
         <Route
           path="/"
@@ -100,7 +106,6 @@ const App = () => {
             )
           }
         />
-
         {/* 404 Route */}
         <Route
           path="*"
