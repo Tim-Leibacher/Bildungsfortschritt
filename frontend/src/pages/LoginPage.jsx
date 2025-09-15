@@ -23,7 +23,7 @@ const LoginPage = () => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: value,
+      [name]: value.trim(), // Entferne Leerzeichen
     }));
     // Clear error when user starts typing
     if (error) setError("");
@@ -33,24 +33,41 @@ const LoginPage = () => {
     e.preventDefault();
     setError("");
 
-    if (!formData.email || !formData.password) {
+    // Verbesserte Validierung mit Trimming
+    const trimmedEmail = formData.email?.trim();
+    const trimmedPassword = formData.password?.trim();
+
+    if (!trimmedEmail || !trimmedPassword) {
       setError("Bitte füllen Sie alle Felder aus");
+      return;
+    }
+
+    // E-Mail Format-Validierung
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setError("Bitte geben Sie eine gültige E-Mail-Adresse ein");
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const result = await login(formData);
+      // Sende getrimmte Daten
+      const result = await login({
+        email: trimmedEmail,
+        password: trimmedPassword,
+      });
 
       if (result.success) {
-        toast.success(`Willkommen zurück, ${result.user.firstName}!`);
+        toast.success(
+          `Willkommen zurück, ${result.user.firstName || "Benutzer"}!`
+        );
       } else {
         setError(result.error);
         toast.error(result.error);
       }
     } catch (error) {
-      const errorMsg = "Ein unerwarteter Fehler ist aufgetreten";
+      const errorMsg = "Verbindungsfehler. Bitte versuchen Sie es erneut.";
       setError(errorMsg);
       toast.error(errorMsg);
     } finally {
@@ -97,6 +114,7 @@ const LoginPage = () => {
                 onChange={handleInputChange}
                 disabled={isLoading}
                 required
+                autoComplete="email"
               />
             </div>
 
@@ -116,12 +134,16 @@ const LoginPage = () => {
                   onChange={handleInputChange}
                   disabled={isLoading}
                   required
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/50 hover:text-base-content"
                   onClick={() => setShowPassword(!showPassword)}
                   disabled={isLoading}
+                  aria-label={
+                    showPassword ? "Passwort verbergen" : "Passwort anzeigen"
+                  }
                 >
                   {showPassword ? (
                     <EyeOffIcon className="h-5 w-5" />

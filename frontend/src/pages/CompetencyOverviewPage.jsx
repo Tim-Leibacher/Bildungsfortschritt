@@ -1,4 +1,4 @@
-// frontend/src/pages/CompetencyOverviewPage.jsx
+// frontend/src/pages/CompetencyOverviewPage.jsx - GEFIXT
 import React, { useEffect, useState } from "react";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
@@ -35,33 +35,47 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
     }
   }, [user, navigate]);
 
-  // Daten laden
+  // Daten laden - GEFIXT: Dependency Array präzisiert
   useEffect(() => {
     const fetchOverviewData = async () => {
       try {
         setLoading(true);
         const response = await competencyAPI.getCompetencyOverview();
-        setOverviewData(response.data);
+
+        // GEFIXT: Validierung der Response-Struktur
+        if (response?.data) {
+          setOverviewData(response.data);
+        } else {
+          throw new Error("Invalid response structure");
+        }
       } catch (error) {
         console.error("Error fetching competency overview:", error);
         toast.error("Fehler beim Laden der Leistungsziele-Übersicht");
+        setOverviewData(null); // GEFIXT: Explizit auf null setzen
       } finally {
         setLoading(false);
       }
     };
 
-    if (user?.isBB) {
+    // GEFIXT: Nur einmal laden wenn user.isBB true ist
+    if (user?.isBB && !overviewData && !loading) {
       fetchOverviewData();
     }
-  }, [user]);
+  }, [user?.isBB]); // GEFIXT: Entfernt überflüssige Dependencies
 
   // Daten aktualisieren
   const handleRefresh = async () => {
     try {
       setLoading(true);
       const response = await competencyAPI.getCompetencyOverview();
-      setOverviewData(response.data);
-      toast.success("Daten erfolgreich aktualisiert");
+
+      // GEFIXT: Validierung der Response-Struktur
+      if (response?.data) {
+        setOverviewData(response.data);
+        toast.success("Daten erfolgreich aktualisiert");
+      } else {
+        throw new Error("Invalid response structure");
+      }
     } catch (error) {
       console.error("Error refreshing data:", error);
       toast.error("Fehler beim Aktualisieren der Daten");
@@ -70,86 +84,124 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
     }
   };
 
-  // Filter und Suche
+  // Filter und Suche - GEFIXT: Robust gegen undefined/null
   const getFilteredAreas = () => {
-    if (!overviewData) return {};
+    // GEFIXT: Defensive Programmierung - frühe Rückgabe bei fehlenden Daten
+    if (!overviewData?.competenciesByArea) {
+      console.warn("overviewData oder competenciesByArea ist undefined");
+      return {};
+    }
 
     const { competenciesByArea } = overviewData;
     const filteredAreas = {};
 
-    Object.keys(competenciesByArea).forEach((area) => {
-      let areaCompetencies = competenciesByArea[area];
+    // GEFIXT: Zusätzliche Validierung
+    if (typeof competenciesByArea !== "object" || competenciesByArea === null) {
+      console.error(
+        "competenciesByArea ist kein gültiges Objekt:",
+        competenciesByArea
+      );
+      return {};
+    }
 
-      // Status Filter
-      if (filterStatus === "covered") {
-        areaCompetencies = areaCompetencies.filter((c) => c.isCovered);
-      } else if (filterStatus === "missing") {
-        areaCompetencies = areaCompetencies.filter((c) => !c.isCovered);
-      }
+    try {
+      Object.keys(competenciesByArea).forEach((area) => {
+        let areaCompetencies = competenciesByArea[area];
 
-      // Suchfilter
-      if (searchTerm.trim()) {
-        const searchLower = searchTerm.toLowerCase();
-        areaCompetencies = areaCompetencies.filter(
-          (c) =>
-            c.code.toLowerCase().includes(searchLower) ||
-            c.title.toLowerCase().includes(searchLower) ||
-            c.description?.toLowerCase().includes(searchLower)
-        );
-      }
+        // GEFIXT: Validierung dass areaCompetencies ein Array ist
+        if (!Array.isArray(areaCompetencies)) {
+          console.warn(
+            `areaCompetencies für Bereich ${area} ist kein Array:`,
+            areaCompetencies
+          );
+          return; // Diesen Bereich überspringen
+        }
 
-      // Bereichsfilter
-      if (selectedAreas.size > 0 && !selectedAreas.has(area)) {
-        return; // Bereich überspringen
-      }
+        // Status Filter
+        if (filterStatus === "covered") {
+          areaCompetencies = areaCompetencies.filter((c) => c?.isCovered);
+        } else if (filterStatus === "missing") {
+          areaCompetencies = areaCompetencies.filter((c) => !c?.isCovered);
+        }
 
-      if (areaCompetencies.length > 0) {
-        filteredAreas[area] = areaCompetencies;
-      }
-    });
+        // Suchfilter
+        if (searchTerm.trim()) {
+          const searchLower = searchTerm.toLowerCase();
+          areaCompetencies = areaCompetencies.filter(
+            (c) =>
+              c?.code?.toLowerCase().includes(searchLower) ||
+              c?.title?.toLowerCase().includes(searchLower) ||
+              c?.description?.toLowerCase().includes(searchLower)
+          );
+        }
+
+        // Bereichsfilter
+        if (selectedAreas.size > 0 && !selectedAreas.has(area)) {
+          return; // Bereich überspringen
+        }
+
+        if (areaCompetencies.length > 0) {
+          filteredAreas[area] = areaCompetencies;
+        }
+      });
+    } catch (error) {
+      console.error("Fehler beim Filtern der Bereiche:", error);
+      return {};
+    }
 
     return filteredAreas;
   };
 
-  // CSV Export
+  // CSV Export - GEFIXT: Defensive Programmierung
   const handleExportCSV = () => {
-    if (!overviewData) return;
+    if (!overviewData?.competenciesByArea) {
+      toast.error("Keine Daten zum Exportieren verfügbar");
+      return;
+    }
 
-    const csvData = [];
-    csvData.push([
-      "Bereich",
-      "Code",
-      "Titel",
-      "Beschreibung",
-      "Taxonomie",
-      "Status",
-      "Module",
-    ]);
+    try {
+      const csvData = [];
+      csvData.push([
+        "Bereich",
+        "Code",
+        "Titel",
+        "Beschreibung",
+        "Taxonomie",
+        "Status",
+        "Module",
+      ]);
 
-    Object.keys(overviewData.competenciesByArea).forEach((area) => {
-      overviewData.competenciesByArea[area].forEach((competency) => {
-        csvData.push([
-          area,
-          competency.code,
-          competency.title,
-          competency.description || "",
-          competency.taxonomy,
-          competency.isCovered ? "Abgedeckt" : "Fehlend",
-          competency.modules?.map((m) => m.code).join("; ") || "",
-        ]);
+      Object.keys(overviewData.competenciesByArea).forEach((area) => {
+        const areaCompetencies = overviewData.competenciesByArea[area];
+        if (Array.isArray(areaCompetencies)) {
+          areaCompetencies.forEach((competency) => {
+            csvData.push([
+              area,
+              competency?.code || "",
+              competency?.title || "",
+              competency?.description || "",
+              competency?.taxonomy || "",
+              competency?.isCovered ? "Abgedeckt" : "Fehlend",
+              competency?.modules?.map((m) => m?.code).join("; ") || "",
+            ]);
+          });
+        }
       });
-    });
 
-    const csvContent = csvData
-      .map((row) => row.map((cell) => `"${cell}"`).join(","))
-      .join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `leistungsziele_uebersicht_${
-      new Date().toISOString().split("T")[0]
-    }.csv`;
-    link.click();
+      const csvContent = csvData
+        .map((row) => row.map((cell) => `"${cell}"`).join(","))
+        .join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `leistungsziele_uebersicht_${
+        new Date().toISOString().split("T")[0]
+      }.csv`;
+      link.click();
+    } catch (error) {
+      console.error("Fehler beim CSV Export:", error);
+      toast.error("Fehler beim Exportieren der CSV-Datei");
+    }
   };
 
   // Bereich Toggle
@@ -196,8 +248,32 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
     );
   }
 
+  // GEFIXT: Defensive Programmierung für die Render-Phase
   const filteredAreas = getFilteredAreas();
   const { overview, areaStats } = overviewData;
+
+  // GEFIXT: Validierung der benötigten Daten vor Rendering
+  if (!overview || !areaStats) {
+    return (
+      <div className="min-h-screen">
+        <Navbar user={user} onLogout={onLogout} />
+        <div className="max-w-7xl mx-auto p-4 mt-6">
+          <div className="text-center py-12">
+            <AlertTriangleIcon className="size-16 text-base-content/20 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-base-content mb-2">
+              Unvollständige Daten
+            </h3>
+            <p className="text-base-content/70 mb-4">
+              Die geladenen Daten sind unvollständig.
+            </p>
+            <button className="btn btn-primary" onClick={handleRefresh}>
+              Daten neu laden
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen">
@@ -228,6 +304,7 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
               <button
                 onClick={handleExportCSV}
                 className="btn btn-primary btn-sm"
+                disabled={!overviewData?.competenciesByArea}
               >
                 <DownloadIcon className="size-4" />
                 Export CSV
@@ -244,7 +321,7 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
             </div>
             <div className="stat-title">Gesamt Leistungsziele</div>
             <div className="stat-value text-primary">
-              {overview.totalCompetencies}
+              {overview?.totalCompetencies || 0}
             </div>
           </div>
 
@@ -254,10 +331,7 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
             </div>
             <div className="stat-title">Abgedeckt</div>
             <div className="stat-value text-success">
-              {overview.coveredCount}
-            </div>
-            <div className="stat-desc">
-              {overview.coveragePercentage}% abgedeckt
+              {overview?.coveredCount || 0}
             </div>
           </div>
 
@@ -267,10 +341,7 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
             </div>
             <div className="stat-title">Fehlend</div>
             <div className="stat-value text-error">
-              {overview.uncoveredCount}
-            </div>
-            <div className="stat-desc">
-              {100 - overview.coveragePercentage}% fehlend
+              {overview?.uncoveredCount || 0}
             </div>
           </div>
 
@@ -278,15 +349,17 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
             <div className="stat-figure text-info">
               <TrendingUpIcon className="size-8" />
             </div>
-            <div className="stat-title">Fortschritt</div>
+            <div className="stat-title">Abdeckung</div>
             <div className="stat-value text-info">
-              {overview.coveragePercentage}%
+              {overview?.coveragePercentage || 0}%
             </div>
-            <div className="w-full bg-base-200 rounded-full h-2 mt-2">
-              <div
-                className="bg-info h-2 rounded-full transition-all duration-500"
-                style={{ width: `${overview.coveragePercentage}%` }}
-              ></div>
+            <div className="stat-desc">
+              <div className="w-full bg-base-300 rounded-full h-2 mt-2">
+                <div
+                  className="bg-info h-2 rounded-full transition-all duration-300"
+                  style={{ width: `${overview?.coveragePercentage || 0}%` }}
+                ></div>
+              </div>
             </div>
           </div>
         </div>
@@ -324,7 +397,7 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
                 </select>
               </div>
 
-              {/* Bereichsfilter */}
+              {/* Bereichsfilter - GEFIXT: Defensive Programmierung */}
               <div className="form-control">
                 <div className="dropdown dropdown-end w-full">
                   <label tabIndex={0} className="btn btn-outline w-full">
@@ -336,29 +409,42 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
                     tabIndex={0}
                     className="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-52 z-50"
                   >
-                    {Object.keys(areaStats).map((area) => {
-                      const areaInfo = competencyHelpers.formatArea(area);
-                      return (
-                        <li key={area}>
-                          <label className="cursor-pointer">
-                            <input
-                              type="checkbox"
-                              className="checkbox checkbox-sm"
-                              checked={selectedAreas.has(area)}
-                              onChange={() => toggleAreaSelection(area)}
-                            />
-                            <span className="flex items-center gap-2">
-                              <span
-                                className={`badge badge-${areaInfo.color} badge-sm`}
-                              >
-                                {areaInfo.code}
+                    {/* GEFIXT: Sichere Iteration über areaStats */}
+                    {areaStats && typeof areaStats === "object" ? (
+                      Object.keys(areaStats).map((area) => {
+                        const areaInfo = competencyHelpers.formatArea(area);
+                        return (
+                          <li key={area}>
+                            <label className="cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="checkbox checkbox-sm"
+                                checked={selectedAreas.has(area)}
+                                onChange={() => toggleAreaSelection(area)}
+                              />
+                              <span className="flex items-center gap-2">
+                                <span
+                                  className={`badge badge-${
+                                    areaInfo?.color || "neutral"
+                                  } badge-sm`}
+                                >
+                                  {areaInfo?.code || area}
+                                </span>
+                                <span className="text-sm">
+                                  {areaInfo?.title || area}
+                                </span>
                               </span>
-                              <span className="text-sm">{areaInfo.title}</span>
-                            </span>
-                          </label>
-                        </li>
-                      );
-                    })}
+                            </label>
+                          </li>
+                        );
+                      })
+                    ) : (
+                      <li>
+                        <span className="text-sm text-base-content/60">
+                          Keine Bereiche verfügbar
+                        </span>
+                      </li>
+                    )}
                   </ul>
                 </div>
               </div>
@@ -366,21 +452,24 @@ const CompetencyOverviewPage = ({ user, onLogout }) => {
           </div>
         </div>
 
-        {/* Bereichs-Übersichten */}
+        {/* Bereichs-Übersichten - GEFIXT: Sichere Iteration */}
         <div className="space-y-6">
-          {Object.keys(filteredAreas)
-            .sort() // Alphabetische Sortierung
-            .map((area) => (
-              <AreaOverview
-                key={area}
-                area={area}
-                competencies={filteredAreas[area]}
-                stats={areaStats[area]}
-              />
-            ))}
+          {filteredAreas && Object.keys(filteredAreas).length > 0
+            ? Object.keys(filteredAreas)
+                .sort() // Alphabetische Sortierung
+                .map((area) => (
+                  <AreaOverview
+                    key={area}
+                    area={area}
+                    competencies={filteredAreas[area]}
+                    stats={areaStats?.[area]}
+                  />
+                ))
+            : null}
         </div>
 
-        {Object.keys(filteredAreas).length === 0 && (
+        {/* Keine Ergebnisse */}
+        {filteredAreas && Object.keys(filteredAreas).length === 0 && (
           <div className="text-center py-12">
             <SearchIcon className="size-16 text-base-content/20 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-base-content mb-2">
