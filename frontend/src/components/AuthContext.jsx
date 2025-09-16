@@ -4,63 +4,51 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from "react";
 import { authAPI } from "../lib/api";
 
 // ========================================
 // KONFIGURATION
 // ========================================
+
 const AUTH_CONFIG = {
   VALIDATION: {
     EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-    PASSWORD_REGEX: /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)[a-zA-Z\d@$!%*?&]{8,}$/,
-    EMAIL_MAX_LENGTH: 254,
+    PASSWORD_MIN_LENGTH: 6,
     PASSWORD_MAX_LENGTH: 128,
+    EMAIL_MAX_LENGTH: 254,
   },
-  MESSAGES: {
-    LOGIN: {
-      VALIDATION_ERROR: "E-Mail und Passwort sind erforderlich",
-      INVALID_EMAIL: "Ungültige E-Mail-Adresse",
-      INVALID_CREDENTIALS: "Ungültige E-Mail-Adresse oder Passwort",
-      RATE_LIMITED:
-        "Zu viele Login-Versuche. Bitte warten Sie {minutes} Minuten.",
-      ACCOUNT_LOCKED:
-        "Account temporär gesperrt. Versuchen Sie es in {minutes} Minuten erneut.",
-      SERVER_ERROR: "Server-Fehler. Bitte versuchen Sie es später erneut.",
-      NETWORK_ERROR:
-        "Netzwerkfehler. Bitte überprüfen Sie Ihre Internetverbindung.",
-      GENERAL_ERROR: "Ein Fehler ist beim Anmelden aufgetreten",
-    },
-    REGISTER: {
-      EMAIL_EXISTS: "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits",
-      WEAK_PASSWORD:
-        "Passwort muss mindestens 8 Zeichen enthalten, mit Groß-, Kleinbuchstaben und Zahlen",
-      INVALID_DATA: "Ungültige Eingabedaten",
-      SERVER_ERROR: "Server-Fehler. Bitte versuchen Sie es später erneut.",
-      GENERAL_ERROR: "Ein Fehler ist bei der Registrierung aufgetreten",
-    },
-    GENERAL: {
-      TOKEN_VALIDATION_FAILED: "Token-Validierung fehlgeschlagen",
-      LOGOUT_ERROR: "Logout-Fehler",
-      INCOMPLETE_SERVER_RESPONSE: "Unvollständige Antwort vom Server",
-      NO_USER_DATA_RECEIVED: "Keine Benutzerdaten empfangen",
-    },
-  },
+
   SECURITY: {
-    MAX_LOGIN_ATTEMPTS: 5,
+    MAX_FAILED_ATTEMPTS: 3,
     LOCKOUT_DURATION: 15 * 60 * 1000, // 15 Minuten
     RATE_LIMIT_WINDOW: 15 * 60 * 1000, // 15 Minuten
     SESSION_TIMEOUT: 60 * 60 * 1000, // 1 Stunde
   },
-  TOKEN: {
-    ACCESS_TOKEN_KEY: "accessToken",
-    USE_SESSION_STORAGE: true,
+
+  MESSAGES: {
+    VALIDATION_ERROR: "E-Mail und Passwort sind erforderlich",
+    INVALID_EMAIL: "Ungültige E-Mail-Adresse",
+    INVALID_CREDENTIALS: "Ungültige E-Mail-Adresse oder Passwort",
+    ACCOUNT_LOCKED:
+      "Account temporär gesperrt. Versuchen Sie es in {minutes} Minuten erneut.",
+    SERVER_ERROR: "Server-Fehler. Bitte versuchen Sie es später erneut.",
+    NETWORK_ERROR:
+      "Netzwerkfehler. Bitte überprüfen Sie Ihre Internetverbindung.",
+    GENERAL_ERROR: "Ein Fehler ist beim Anmelden aufgetreten",
+    EMAIL_EXISTS: "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits",
+    WEAK_PASSWORD: "Passwort muss mindestens 6 Zeichen enthalten",
+    REGISTRATION_ERROR: "Ein Fehler ist bei der Registrierung aufgetreten",
+    TOKEN_VALIDATION_FAILED: "Token-Validierung fehlgeschlagen",
+    NO_USER_DATA: "Keine Benutzerdaten empfangen",
   },
 };
 
 // ========================================
-// UTILITIES
+// UTILITY FUNCTIONS
 // ========================================
+
 const validateEmail = (email) => {
   if (!email || typeof email !== "string") return false;
   return (
@@ -72,9 +60,8 @@ const validateEmail = (email) => {
 const validatePassword = (password) => {
   if (!password || typeof password !== "string") return false;
   return (
-    password.length >= 8 &&
-    password.length <= AUTH_CONFIG.VALIDATION.PASSWORD_MAX_LENGTH &&
-    AUTH_CONFIG.VALIDATION.PASSWORD_REGEX.test(password)
+    password.length >= AUTH_CONFIG.VALIDATION.PASSWORD_MIN_LENGTH &&
+    password.length <= AUTH_CONFIG.VALIDATION.PASSWORD_MAX_LENGTH
   );
 };
 
@@ -97,89 +84,84 @@ const sanitizeUserData = (userData) => {
   return sanitized;
 };
 
+const formatMessage = (message, params = {}) => {
+  let formatted = message;
+  Object.entries(params).forEach(([key, value]) => {
+    formatted = formatted.replace(`{${key}}`, value);
+  });
+  return formatted;
+};
+
 // ========================================
-// TOKEN STORAGE
+// SECURITY STATE MANAGEMENT
 // ========================================
-class TokenStorage {
+
+class SecurityManager {
   constructor() {
-    this.tokenKey = AUTH_CONFIG.TOKEN.ACCESS_TOKEN_KEY;
-  }
-
-  setToken(token) {
-    try {
-      if (AUTH_CONFIG.TOKEN.USE_SESSION_STORAGE && sessionStorage) {
-        sessionStorage.setItem(this.tokenKey, token);
-      } else {
-        localStorage.setItem(this.tokenKey, token);
-      }
-    } catch (error) {
-      console.error("Token storage failed:", error);
-    }
-  }
-
-  getToken() {
-    try {
-      if (AUTH_CONFIG.TOKEN.USE_SESSION_STORAGE && sessionStorage) {
-        return sessionStorage.getItem(this.tokenKey);
-      } else {
-        return localStorage.getItem(this.tokenKey);
-      }
-    } catch (error) {
-      console.warn("Token retrieval failed:", error);
-      return null;
-    }
-  }
-
-  removeToken() {
-    try {
-      if (sessionStorage) sessionStorage.removeItem(this.tokenKey);
-      localStorage.removeItem(this.tokenKey);
-    } catch (error) {
-      console.warn("Token removal failed:", error);
-    }
-  }
-}
-
-// ========================================
-// RATE LIMITER
-// ========================================
-class RateLimiter {
-  constructor(maxAttempts = 5, windowMs = 15 * 60 * 1000) {
-    this.maxAttempts = maxAttempts;
-    this.windowMs = windowMs;
     this.attempts = new Map();
+    this.lockedAccounts = new Map();
   }
 
-  isAllowed(identifier = "default") {
+  isAllowed(email) {
     const now = Date.now();
-    const userAttempts = this.attempts.get(identifier) || [];
-    const validAttempts = userAttempts.filter(
-      (timestamp) => now - timestamp < this.windowMs
-    );
 
-    if (validAttempts.length >= this.maxAttempts) {
+    // Prüfe ob Account gesperrt ist
+    const lockInfo = this.lockedAccounts.get(email);
+    if (lockInfo && now < lockInfo.lockUntil) {
       return false;
     }
 
-    validAttempts.push(now);
-    this.attempts.set(identifier, validAttempts);
+    // Entferne abgelaufene Sperre
+    if (lockInfo && now >= lockInfo.lockUntil) {
+      this.lockedAccounts.delete(email);
+      this.attempts.delete(email);
+    }
+
     return true;
   }
 
-  getRemainingTime(identifier = "default") {
-    const userAttempts = this.attempts.get(identifier) || [];
-    if (userAttempts.length === 0) return 0;
+  recordFailedAttempt(email) {
+    const now = Date.now();
+    const userAttempts = this.attempts.get(email) || [];
 
-    const oldestAttempt = Math.min(...userAttempts);
-    const remainingTime = this.windowMs - (Date.now() - oldestAttempt);
-    return Math.max(0, remainingTime);
+    // Entferne alte Versuche außerhalb des Zeitfensters
+    const validAttempts = userAttempts.filter(
+      (timestamp) => now - timestamp < AUTH_CONFIG.SECURITY.RATE_LIMIT_WINDOW
+    );
+
+    validAttempts.push(now);
+    this.attempts.set(email, validAttempts);
+
+    // Sperre Account nach zu vielen Versuchen
+    if (validAttempts.length >= AUTH_CONFIG.SECURITY.MAX_FAILED_ATTEMPTS) {
+      this.lockedAccounts.set(email, {
+        lockUntil: now + AUTH_CONFIG.SECURITY.LOCKOUT_DURATION,
+        attempts: validAttempts.length,
+      });
+    }
+
+    return validAttempts.length;
+  }
+
+  getRemainingLockTime(email) {
+    const lockInfo = this.lockedAccounts.get(email);
+    if (!lockInfo) return 0;
+
+    const remainingTime = lockInfo.lockUntil - Date.now();
+    return Math.max(0, Math.ceil(remainingTime / 1000 / 60)); // in Minuten
+  }
+
+  clearFailedAttempts(email) {
+    this.attempts.delete(email);
+    this.lockedAccounts.delete(email);
   }
 }
 
 // ========================================
-// AUTH CONTEXT
+// CONTEXT SETUP
 // ========================================
-const AuthContext = createContext();
+
+const AuthContext = createContext(undefined);
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -189,77 +171,51 @@ export const useAuth = () => {
   return context;
 };
 
-export const AuthProvider = ({ children }) => {
-  // ========================================
-  // STATE MANAGEMENT
-  // ========================================
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [securityState, setSecurityState] = useState({
-    isLocked: false,
-    lockUntil: null,
-    failedAttempts: 0,
-  });
+// ========================================
+// AUTH PROVIDER COMPONENT
+// ========================================
 
-  // ========================================
-  // INSTANCES
-  // ========================================
-  const tokenStorage = new TokenStorage();
-  const loginLimiter = new RateLimiter();
+export const AuthProvider = ({ children }) => {
+  // State Management
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Security Manager Instance
+  const securityManager = useMemo(() => new SecurityManager(), []);
 
   // ========================================
   // HELPER FUNCTIONS
   // ========================================
+
   const resetAuthState = useCallback(() => {
-    tokenStorage.removeToken();
     setUser(null);
     setIsAuthenticated(false);
   }, []);
 
-  const setAuthenticatedState = useCallback((userData, token) => {
-    if (token) {
-      tokenStorage.setToken(token);
-    }
-    setUser(userData);
+  const setAuthenticatedState = useCallback((userData) => {
+    const sanitizedUser = sanitizeUserData(userData);
+    setUser(sanitizedUser);
     setIsAuthenticated(true);
-  }, []);
-
-  const formatMessage = useCallback((message, params = {}) => {
-    let formatted = message;
-    Object.entries(params).forEach(([key, value]) => {
-      formatted = formatted.replace(`{${key}}`, value);
-    });
-    return formatted;
   }, []);
 
   // ========================================
   // INITIALIZATION
   // ========================================
+
   useEffect(() => {
     const initializeAuth = async () => {
-      const token = tokenStorage.getToken();
-
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
       try {
         const response = await authAPI.getCurrentUser();
         const userData = response.data?.user || response.data;
 
         if (!userData) {
-          throw new Error(AUTH_CONFIG.MESSAGES.GENERAL.NO_USER_DATA_RECEIVED);
+          throw new Error(AUTH_CONFIG.MESSAGES.NO_USER_DATA);
         }
 
-        const sanitizedUser = sanitizeUserData(userData);
-        setAuthenticatedState(sanitizedUser);
+        setAuthenticatedState(userData);
       } catch (error) {
-        console.error(
-          AUTH_CONFIG.MESSAGES.GENERAL.TOKEN_VALIDATION_FAILED,
-          error
-        );
+        console.error(AUTH_CONFIG.MESSAGES.TOKEN_VALIDATION_FAILED, error);
         resetAuthState();
       } finally {
         setLoading(false);
@@ -272,208 +228,167 @@ export const AuthProvider = ({ children }) => {
   // ========================================
   // LOGIN FUNCTION
   // ========================================
-  const login = async (credentials) => {
-    // Input validation
-    if (!credentials) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.LOGIN.VALIDATION_ERROR,
-      };
-    }
 
-    if (!credentials.email || !credentials.password) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.LOGIN.VALIDATION_ERROR,
-      };
-    }
-
-    if (!validateEmail(credentials.email)) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.LOGIN.INVALID_EMAIL,
-      };
-    }
-
-    // Rate limiting check
-    if (!loginLimiter.isAllowed(credentials.email)) {
-      const remainingTime = Math.ceil(
-        loginLimiter.getRemainingTime(credentials.email) / 1000 / 60
-      );
-      return {
-        success: false,
-        error: formatMessage(AUTH_CONFIG.MESSAGES.LOGIN.RATE_LIMITED, {
-          minutes: remainingTime,
-        }),
-      };
-    }
-
-    // Security state check
-    if (securityState.isLocked && Date.now() < securityState.lockUntil) {
-      const remainingTime = Math.ceil(
-        (securityState.lockUntil - Date.now()) / 1000 / 60
-      );
-      return {
-        success: false,
-        error: formatMessage(AUTH_CONFIG.MESSAGES.LOGIN.ACCOUNT_LOCKED, {
-          minutes: remainingTime,
-        }),
-      };
-    }
-
-    try {
-      setLoading(true);
-
-      const sanitizedCredentials = sanitizeUserData(credentials);
-      const response = await authAPI.login(sanitizedCredentials);
-      const { user: userData, accessToken } = response.data;
-
-      if (!userData || !accessToken) {
-        throw new Error(
-          AUTH_CONFIG.MESSAGES.GENERAL.INCOMPLETE_SERVER_RESPONSE
-        );
-      }
-
-      const sanitizedUser = sanitizeUserData(userData);
-      setAuthenticatedState(sanitizedUser, accessToken);
-
-      // Reset security state on successful login
-      setSecurityState({
-        isLocked: false,
-        lockUntil: null,
-        failedAttempts: 0,
-      });
-
-      return { success: true, user: sanitizedUser };
-    } catch (error) {
-      // Update security state on failed login
-      const newFailedAttempts = securityState.failedAttempts + 1;
-      let newSecurityState = {
-        ...securityState,
-        failedAttempts: newFailedAttempts,
-      };
-
-      // Lock account after 3 consecutive failed attempts
-      if (newFailedAttempts >= 3) {
-        newSecurityState = {
-          ...newSecurityState,
-          isLocked: true,
-          lockUntil: Date.now() + AUTH_CONFIG.SECURITY.LOCKOUT_DURATION,
+  const login = useCallback(
+    async (credentials) => {
+      // Input Validation
+      if (!credentials?.email || !credentials?.password) {
+        return {
+          success: false,
+          error: AUTH_CONFIG.MESSAGES.VALIDATION_ERROR,
         };
       }
 
-      setSecurityState(newSecurityState);
-
-      // Enhanced error handling
-      let errorMessage = AUTH_CONFIG.MESSAGES.LOGIN.GENERAL_ERROR;
-
-      if (error.response?.status === 401) {
-        errorMessage = AUTH_CONFIG.MESSAGES.LOGIN.INVALID_CREDENTIALS;
-      } else if (error.response?.status === 429) {
-        errorMessage = AUTH_CONFIG.MESSAGES.LOGIN.RATE_LIMITED.replace(
-          "{minutes}",
-          ""
-        );
-      } else if (error.response?.status >= 500) {
-        errorMessage = AUTH_CONFIG.MESSAGES.LOGIN.SERVER_ERROR;
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message && !error.message.includes("Network Error")) {
-        errorMessage = error.message;
-      } else if (error.code === "NETWORK_ERROR") {
-        errorMessage = AUTH_CONFIG.MESSAGES.LOGIN.NETWORK_ERROR;
+      if (!validateEmail(credentials.email)) {
+        return {
+          success: false,
+          error: AUTH_CONFIG.MESSAGES.INVALID_EMAIL,
+        };
       }
 
-      return { success: false, error: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
+      // Security Check
+      if (!securityManager.isAllowed(credentials.email)) {
+        const remainingTime = securityManager.getRemainingLockTime(
+          credentials.email
+        );
+        return {
+          success: false,
+          error: formatMessage(AUTH_CONFIG.MESSAGES.ACCOUNT_LOCKED, {
+            minutes: remainingTime,
+          }),
+        };
+      }
+
+      try {
+        setLoading(true);
+
+        const sanitizedCredentials = sanitizeUserData(credentials);
+        const response = await authAPI.login(sanitizedCredentials);
+        const { user: userData, accessToken } = response.data;
+
+        if (!userData || !accessToken) {
+          throw new Error(AUTH_CONFIG.MESSAGES.NO_USER_DATA);
+        }
+
+        // Erfolgreicher Login - Security State zurücksetzen
+        securityManager.clearFailedAttempts(credentials.email);
+        setAuthenticatedState(userData);
+
+        return { success: true, user: userData };
+      } catch (error) {
+        // Failed Attempt registrieren
+        securityManager.recordFailedAttempt(credentials.email);
+
+        // Error Handling
+        let errorMessage = AUTH_CONFIG.MESSAGES.GENERAL_ERROR;
+
+        if (error.response?.status === 401) {
+          errorMessage = AUTH_CONFIG.MESSAGES.INVALID_CREDENTIALS;
+        } else if (error.response?.status === 429) {
+          errorMessage = AUTH_CONFIG.MESSAGES.ACCOUNT_LOCKED.replace(
+            "{minutes}",
+            "15"
+          );
+        } else if (error.response?.status >= 500) {
+          errorMessage = AUTH_CONFIG.MESSAGES.SERVER_ERROR;
+        } else if (error.response?.data?.message) {
+          errorMessage = error.response.data.message;
+        } else if (error.code === "NETWORK_ERROR") {
+          errorMessage = AUTH_CONFIG.MESSAGES.NETWORK_ERROR;
+        }
+
+        return { success: false, error: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [securityManager, setAuthenticatedState]
+  );
 
   // ========================================
   // REGISTER FUNCTION
   // ========================================
-  const register = async (userData) => {
-    if (!userData?.email || !userData?.password) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.LOGIN.VALIDATION_ERROR,
-      };
-    }
 
-    if (!validateEmail(userData.email)) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.LOGIN.INVALID_EMAIL,
-      };
-    }
-
-    if (!validatePassword(userData.password)) {
-      return {
-        success: false,
-        error: AUTH_CONFIG.MESSAGES.REGISTER.WEAK_PASSWORD,
-      };
-    }
-
-    try {
-      setLoading(true);
-      const sanitizedUserData = sanitizeUserData(userData);
-      const response = await authAPI.register(sanitizedUserData);
-      const { user: newUser, accessToken } = response.data;
-
-      if (!newUser || !accessToken) {
-        throw new Error(
-          AUTH_CONFIG.MESSAGES.GENERAL.INCOMPLETE_SERVER_RESPONSE
-        );
+  const register = useCallback(
+    async (userData) => {
+      // Input Validation
+      if (!userData?.email || !userData?.password) {
+        return {
+          success: false,
+          error: AUTH_CONFIG.MESSAGES.VALIDATION_ERROR,
+        };
       }
 
-      const sanitizedUser = sanitizeUserData(newUser);
-      setAuthenticatedState(sanitizedUser, accessToken);
-      return { success: true, user: sanitizedUser };
-    } catch (error) {
-      let errorMessage = AUTH_CONFIG.MESSAGES.REGISTER.GENERAL_ERROR;
-
-      if (error.response?.status === 409) {
-        errorMessage = AUTH_CONFIG.MESSAGES.REGISTER.EMAIL_EXISTS;
-      } else if (error.response?.status === 400) {
-        errorMessage =
-          error.response.data?.message ||
-          AUTH_CONFIG.MESSAGES.REGISTER.INVALID_DATA;
-      } else if (error.response?.status >= 500) {
-        errorMessage = AUTH_CONFIG.MESSAGES.REGISTER.SERVER_ERROR;
-      } else if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
+      if (!validateEmail(userData.email)) {
+        return {
+          success: false,
+          error: AUTH_CONFIG.MESSAGES.INVALID_EMAIL,
+        };
       }
 
-      return { success: false, error: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (!validatePassword(userData.password)) {
+        return {
+          success: false,
+          error: AUTH_CONFIG.MESSAGES.WEAK_PASSWORD,
+        };
+      }
+
+      try {
+        setLoading(true);
+
+        const sanitizedUserData = sanitizeUserData(userData);
+        const response = await authAPI.register(sanitizedUserData);
+        const { user: newUser, accessToken } = response.data;
+
+        if (!newUser || !accessToken) {
+          throw new Error(AUTH_CONFIG.MESSAGES.NO_USER_DATA);
+        }
+
+        setAuthenticatedState(newUser);
+        return { success: true, user: newUser };
+      } catch (error) {
+        let errorMessage = AUTH_CONFIG.MESSAGES.REGISTRATION_ERROR;
+
+        if (error.response?.status === 409) {
+          errorMessage = AUTH_CONFIG.MESSAGES.EMAIL_EXISTS;
+        } else if (error.response?.status === 400) {
+          errorMessage =
+            error.response.data?.message ||
+            AUTH_CONFIG.MESSAGES.VALIDATION_ERROR;
+        } else if (error.response?.status >= 500) {
+          errorMessage = AUTH_CONFIG.MESSAGES.SERVER_ERROR;
+        } else if (error.response?.data?.message) {
+          errorMessage = error.response.data.message;
+        }
+
+        return { success: false, error: errorMessage };
+      } finally {
+        setLoading(false);
+      }
+    },
+    [setAuthenticatedState]
+  );
 
   // ========================================
   // LOGOUT FUNCTION
   // ========================================
-  const logout = async () => {
+
+  const logout = useCallback(async () => {
     try {
       setLoading(true);
       await authAPI.logout();
     } catch (error) {
-      console.error(AUTH_CONFIG.MESSAGES.GENERAL.LOGOUT_ERROR, error);
+      console.error("Logout error:", error);
     } finally {
       resetAuthState();
-      setSecurityState({
-        isLocked: false,
-        lockUntil: null,
-        failedAttempts: 0,
-      });
       setLoading(false);
     }
-  };
+  }, [resetAuthState]);
 
   // ========================================
   // UTILITY FUNCTIONS
   // ========================================
+
   const updateUser = useCallback((updatedUserData) => {
     if (!updatedUserData) return;
 
@@ -490,6 +405,8 @@ export const AuthProvider = ({ children }) => {
       switch (role) {
         case "BB":
           return Boolean(user.isBB);
+        case "student":
+          return Boolean(!user.isBB);
         default:
           return false;
       }
@@ -498,41 +415,55 @@ export const AuthProvider = ({ children }) => {
   );
 
   const isSessionExpiringSoon = useCallback(() => {
-    const token = tokenStorage.getToken();
-    if (!token) return false;
-
-    try {
-      // Simple JWT expiry check (ohne externe library)
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      const timeUntilExpiry = payload.exp * 1000 - Date.now();
-      return timeUntilExpiry < 15 * 60 * 1000; // 15 Minuten
-    } catch (error) {
-      return false;
-    }
+    // Diese Funktion wird von der api.js TokenManager übernommen
+    // Hier als Placeholder für zukünftige Implementierung
+    return false;
   }, []);
 
   // ========================================
-  // CONTEXT VALUE
+  // CONTEXT VALUE MEMOIZATION
   // ========================================
-  const value = {
-    // State
-    user,
-    isAuthenticated,
-    loading,
-    securityState,
 
-    // Functions
-    login,
-    register,
-    logout,
-    updateUser,
-    hasRole,
-    isSessionExpiringSoon,
-    resetAuthState,
+  const contextValue = useMemo(
+    () => ({
+      // State
+      user,
+      isAuthenticated,
+      loading,
 
-    // Config (read-only)
-    config: AUTH_CONFIG,
-  };
+      // Actions
+      login,
+      register,
+      logout,
+      updateUser,
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+      // Utility Functions
+      hasRole,
+      isSessionExpiringSoon,
+      resetAuthState,
+
+      // Security Info (read-only)
+      securityConfig: AUTH_CONFIG.SECURITY,
+    }),
+    [
+      user,
+      isAuthenticated,
+      loading,
+      login,
+      register,
+      logout,
+      updateUser,
+      hasRole,
+      isSessionExpiringSoon,
+      resetAuthState,
+    ]
+  );
+
+  // ========================================
+  // RENDER
+  // ========================================
+
+  return (
+    <AuthContext.Provider value={contextValue}>{children}</AuthContext.Provider>
+  );
 };

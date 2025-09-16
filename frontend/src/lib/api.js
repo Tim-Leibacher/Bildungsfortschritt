@@ -1,39 +1,42 @@
 import axios from "axios";
-// ENTFERNT: Ungültiger Backend-Import
 
 // ========================================
-// CONFIGURATION & CONSTANTS
+// KONFIGURATION
 // ========================================
 
 const API_CONFIG = {
-  // Environment-basierte Konfiguration
   BASE_URL: import.meta.env.VITE_API_BASE_URL || "http://localhost:5001/api",
-  TIMEOUT: import.meta.env.VITE_API_TIMEOUT || 10000,
+  TIMEOUT: parseInt(import.meta.env.VITE_API_TIMEOUT) || 10000,
   WITH_CREDENTIALS: true,
 
-  // Retry-Konfiguration
-  RETRY_ATTEMPTS: 3,
-  RETRY_DELAY: 1000,
+  RETRY: {
+    ATTEMPTS: 3,
+    DELAY_BASE: 1000,
+    MULTIPLIER: 2,
+  },
 
-  // Token-Konfiguration
-  TOKEN_KEY: "accessToken",
-  REFRESH_TOKEN_KEY: "refreshToken",
+  TOKEN: {
+    ACCESS_KEY: "accessToken",
+    STORAGE_TYPE: "localStorage", // localStorage oder sessionStorage
+  },
 
-  // Ausgeschlossene Routen für Token-Refresh
   EXCLUDED_REFRESH_ROUTES: ["/auth/login", "/auth/register", "/auth/refresh"],
 };
 
 // ========================================
-// UTILITIES & HELPERS
+// TOKEN MANAGEMENT
 // ========================================
 
-/**
- * Sichere Token-Verwaltung mit Validierung
- */
 class TokenManager {
+  static getStorage() {
+    return API_CONFIG.TOKEN.STORAGE_TYPE === "sessionStorage"
+      ? sessionStorage
+      : localStorage;
+  }
+
   static getToken() {
     try {
-      return localStorage.getItem(API_CONFIG.TOKEN_KEY);
+      return this.getStorage().getItem(API_CONFIG.TOKEN.ACCESS_KEY);
     } catch (error) {
       console.warn("Token retrieval failed:", error);
       return null;
@@ -41,10 +44,10 @@ class TokenManager {
   }
 
   static setToken(token) {
+    if (!token) return;
+
     try {
-      if (token) {
-        localStorage.setItem(API_CONFIG.TOKEN_KEY, token);
-      }
+      this.getStorage().setItem(API_CONFIG.TOKEN.ACCESS_KEY, token);
     } catch (error) {
       console.error("Token storage failed:", error);
     }
@@ -52,8 +55,8 @@ class TokenManager {
 
   static removeToken() {
     try {
-      localStorage.removeItem(API_CONFIG.TOKEN_KEY);
-      localStorage.removeItem(API_CONFIG.REFRESH_TOKEN_KEY);
+      localStorage.removeItem(API_CONFIG.TOKEN.ACCESS_KEY);
+      sessionStorage.removeItem(API_CONFIG.TOKEN.ACCESS_KEY);
     } catch (error) {
       console.warn("Token removal failed:", error);
     }
@@ -63,23 +66,22 @@ class TokenManager {
     if (!token) return true;
 
     try {
-      // JWT-Token dekodieren ohne Library (nur für Expiry-Check)
       const payload = JSON.parse(atob(token.split(".")[1]));
       const expiryTime = payload.exp * 1000;
       const currentTime = Date.now();
-      const timeBuffer = 60 * 1000; // 1 Minute Buffer
+      const bufferTime = 60 * 1000; // 1 Minute Puffer
 
-      return expiryTime - currentTime < timeBuffer;
+      return expiryTime - currentTime < bufferTime;
     } catch (error) {
-      console.warn("Token validation failed:", error);
       return true;
     }
   }
 }
 
-/**
- * Improved Queue-Management für parallele Requests
- */
+// ========================================
+// REQUEST QUEUE FÜR TOKEN REFRESH
+// ========================================
+
 class RequestQueue {
   constructor() {
     this.isRefreshing = false;
@@ -114,33 +116,47 @@ class RequestQueue {
   }
 }
 
-/**
- * Route-Validierung für Token-Refresh
- */
+// ========================================
+// UTILITY FUNCTIONS
+// ========================================
+
 const shouldExcludeFromRefresh = (url) => {
   return API_CONFIG.EXCLUDED_REFRESH_ROUTES.some((route) =>
     url?.includes(route)
   );
 };
 
-/**
- * Retry-Logic mit exponential backoff
- */
-const createRetryFunction = (fn, retries = API_CONFIG.RETRY_ATTEMPTS) => {
+const createRetryWrapper = (fn, maxRetries = API_CONFIG.RETRY.ATTEMPTS) => {
   return async (...args) => {
-    try {
-      return await fn(...args);
-    } catch (error) {
-      if (retries > 0 && error.response?.status >= 500) {
-        const delay =
-          API_CONFIG.RETRY_DELAY * (API_CONFIG.RETRY_ATTEMPTS - retries + 1);
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return createRetryFunction(fn, retries - 1)(...args);
+    let lastError;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        lastError = error;
+
+        // Nur bei Server-Fehlern (5xx) retry
+        const shouldRetry =
+          error.response?.status >= 500 && attempt < maxRetries;
+
+        if (shouldRetry) {
+          const delay =
+            API_CONFIG.RETRY.DELAY_BASE *
+            Math.pow(API_CONFIG.RETRY.MULTIPLIER, attempt);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        break;
       }
-      throw error;
     }
+
+    throw lastError;
   };
 };
+
+const generateRequestId = () => Math.random().toString(36).substr(2, 9);
 
 // ========================================
 // AXIOS INSTANCE SETUP
@@ -156,7 +172,6 @@ const api = axios.create({
   },
 });
 
-// Initialize queue manager
 const requestQueue = new RequestQueue();
 
 // ========================================
@@ -171,10 +186,10 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Request-ID für Debugging hinzufügen
+    // Request-Metadaten für Debugging
     config.metadata = {
       startTime: Date.now(),
-      requestId: Math.random().toString(36).substr(2, 9),
+      requestId: generateRequestId(),
     };
 
     return config;
@@ -191,15 +206,14 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   (response) => {
-    // Erfolgreiche Response-Metriken loggen (Development)
+    // Performance-Logging für Development
     if (import.meta.env.DEV && response.config.metadata) {
       const duration = Date.now() - response.config.metadata.startTime;
       console.log(
-        `✅ API Success [${
-          response.config.metadata.requestId
-        }]: ${response.config.method?.toUpperCase()} ${
-          response.config.url
-        } - ${duration}ms`
+        `API Success [${response.config.metadata.requestId}]: ` +
+          `${response.config.method?.toUpperCase()} ${
+            response.config.url
+          } - ${duration}ms`
       );
     }
     return response;
@@ -207,26 +221,24 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Error-Metriken loggen (Development)
+    // Error-Logging für Development
     if (import.meta.env.DEV && originalRequest?.metadata) {
       const duration = Date.now() - originalRequest.metadata.startTime;
       console.error(
-        `❌ API Error [${
-          originalRequest.metadata.requestId
-        }]: ${originalRequest.method?.toUpperCase()} ${
-          originalRequest.url
-        } - ${duration}ms - Status: ${error.response?.status}`
+        `API Error [${originalRequest.metadata.requestId}]: ` +
+          `${originalRequest.method?.toUpperCase()} ${originalRequest.url} - ` +
+          `${duration}ms - Status: ${error.response?.status}`
       );
     }
 
-    // Ausgeschlossene Routen nicht verarbeiten
+    // Skip token refresh für auth routes
     if (shouldExcludeFromRefresh(originalRequest?.url)) {
       return Promise.reject(error);
     }
 
-    // 401-Fehler mit Token-Refresh behandeln
+    // 401 Fehler behandeln - Token Refresh
     if (error.response?.status === 401 && !originalRequest._retry) {
-      // Bereits refreshing - Request in Queue einreihen
+      // Request bereits in Refresh Queue
       if (requestQueue.isCurrentlyRefreshing()) {
         return new Promise((resolve, reject) => {
           requestQueue.enqueue(
@@ -243,7 +255,6 @@ api.interceptors.response.use(
       requestQueue.setRefreshing(true);
 
       try {
-        // Token-Refresh versuchen
         const refreshResponse = await api.post("/auth/refresh");
         const newToken = refreshResponse.data?.accessToken;
 
@@ -251,21 +262,19 @@ api.interceptors.response.use(
           throw new Error("No access token received from refresh");
         }
 
-        // Token speichern und Queue verarbeiten
         TokenManager.setToken(newToken);
         requestQueue.processQueue(null, newToken);
 
-        // Original Request wiederholen
+        // Original Request mit neuem Token wiederholen
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
         return api(originalRequest);
       } catch (refreshError) {
-        // Refresh fehlgeschlagen - Cleanup und Redirect
         console.error("Token refresh failed:", refreshError);
 
         requestQueue.processQueue(refreshError, null);
         TokenManager.removeToken();
 
-        // Nur umleiten wenn nicht bereits auf Login-Seite
+        // Redirect zur Login-Seite nur wenn nicht bereits dort
         if (
           typeof window !== "undefined" &&
           window.location.pathname !== "/login"
@@ -279,113 +288,95 @@ api.interceptors.response.use(
       }
     }
 
-    // Network-Fehler behandeln
-    if (!error.response && error.code === "ECONNABORTED") {
-      console.error("Request timeout:", originalRequest?.url);
-    }
-
     return Promise.reject(error);
   }
 );
 
 // ========================================
-// API ENDPOINT DEFINITIONS
+// API ENDPOINTS
 // ========================================
 
 /**
- * Authentication API - Verbessert und konsolidiert
+ * Authentication API
  */
 export const authAPI = {
-  login: createRetryFunction((credentials) =>
-    api.post("/auth/login", credentials)
-  ),
-  register: createRetryFunction((userData) =>
-    api.post("/auth/register", userData)
-  ),
-  logout: createRetryFunction(() => api.post("/auth/logout")),
-  refresh: createRetryFunction(() => api.post("/auth/refresh")),
-  getCurrentUser: createRetryFunction(() => api.get("/auth/me")),
+  login: createRetryWrapper((credentials) => {
+    if (!credentials?.email || !credentials?.password) {
+      throw new Error("Email und Passwort sind erforderlich");
+    }
+    return api.post("/auth/login", credentials);
+  }),
 
-  // Neue Security-Endpunkte
-  changePassword: createRetryFunction((passwordData) =>
-    api.put("/auth/change-password", passwordData)
-  ),
-  resetPassword: createRetryFunction((email) =>
-    api.post("/auth/reset-password", { email })
-  ),
-  verifyToken: createRetryFunction(() => api.get("/auth/verify")),
+  register: createRetryWrapper((userData) => {
+    if (!userData?.email || !userData?.password) {
+      throw new Error("Email und Passwort sind erforderlich");
+    }
+    return api.post("/auth/register", userData);
+  }),
+
+  logout: createRetryWrapper(() => api.post("/auth/logout")),
+
+  refresh: createRetryWrapper(() => api.post("/auth/refresh")),
+
+  getCurrentUser: createRetryWrapper(() => api.get("/auth/me")),
 };
 
 /**
- * User API - Bereinigt und erweitert
+ * User API
  */
 export const userAPI = {
-  // User Profile (vereinheitlicht mit authAPI)
-  getCurrentUser: createRetryFunction(() => api.get("/auth/me")), // Verweist auf authAPI für Konsistenz
-  getProfile: createRetryFunction(() => api.get("/user/profile")),
-  updateProfile: createRetryFunction((userData) =>
-    api.put("/user/profile", userData)
-  ),
+  getCurrentUser: createRetryWrapper(() => api.get("/auth/me")),
 
-  // Student Management (für Berufsbildner)
-  getAssignedStudents: createRetryFunction(() => api.get("/user/bb/users")), // Original Endpoint beibehalten
-  getStudentProgress: createRetryFunction((studentId) => {
-    if (!studentId) {
-      throw new Error("Student ID is required");
-    }
+  getProfile: createRetryWrapper(() => api.get("/user/profile")),
+
+  updateProfile: createRetryWrapper((userData) => {
+    if (!userData) throw new Error("User data is required");
+    return api.put("/user/profile", userData);
+  }),
+
+  getAssignedStudents: createRetryWrapper(() => api.get("/user/bb/users")),
+
+  getStudentProgress: createRetryWrapper((studentId) => {
+    if (!studentId) throw new Error("Student ID is required");
     return api.get(`/user/progress/${studentId}`);
   }),
 
-  // Progress Management
-  getUserProgress: createRetryFunction((userId) =>
-    api.get(`/user/progress/${userId || ""}`)
-  ),
-  markModuleAsCompleted: createRetryFunction((moduleId) => {
-    if (!moduleId) {
-      throw new Error("Module ID is required");
-    }
-    return api.post("/user/complete-module", { moduleId });
-  }),
-  unmarkModuleAsCompleted: createRetryFunction((moduleId) => {
-    if (!moduleId) {
-      throw new Error("Module ID is required");
-    }
-    return api.post("/user/uncomplete-module", { moduleId });
+  getUserProgress: createRetryWrapper((userId = "") => {
+    return api.get(`/user/progress/${userId}`);
   }),
 
-  // Bulk Operations
-  markMultipleModulesCompleted: createRetryFunction((moduleIds) => {
-    if (!Array.isArray(moduleIds) || moduleIds.length === 0) {
-      throw new Error("Module IDs array is required");
-    }
-    return api.post("/user/complete-modules", { moduleIds });
+  markModuleAsCompleted: createRetryWrapper((moduleId) => {
+    if (!moduleId) throw new Error("Module ID is required");
+    return api.post("/user/complete-module", { moduleId });
+  }),
+
+  unmarkModuleAsCompleted: createRetryWrapper((moduleId) => {
+    if (!moduleId) throw new Error("Module ID is required");
+    return api.post("/user/uncomplete-module", { moduleId });
   }),
 };
 
 /**
- * Module API - Erweitert mit Caching-Strategien
+ * Module API
  */
 export const moduleAPI = {
-  // Basic Operations
-  getAllModules: createRetryFunction(() => api.get("/modules")),
-  getModule: createRetryFunction((moduleId) => {
-    if (!moduleId) {
-      throw new Error("Module ID is required");
-    }
+  getAllModules: createRetryWrapper(() => api.get("/modules")),
+
+  getModule: createRetryWrapper((moduleId) => {
+    if (!moduleId) throw new Error("Module ID is required");
     return api.get(`/modules/${moduleId}`);
   }),
-  getModulesWithProgress: createRetryFunction(() =>
+
+  getModulesWithProgress: createRetryWrapper(() =>
     api.get("/modules/with-progress")
   ),
 
-  // Advanced Queries
-  getModulesByArea: createRetryFunction((area) => {
-    if (!area) {
-      throw new Error("Area parameter is required");
-    }
+  getModulesByArea: createRetryWrapper((area) => {
+    if (!area) throw new Error("Area parameter is required");
     return api.get("/modules", { params: { area } });
   }),
-  searchModules: createRetryFunction((query) => {
+
+  searchModules: createRetryWrapper((query) => {
     if (!query || query.trim().length < 2) {
       throw new Error("Search query must be at least 2 characters");
     }
@@ -394,125 +385,88 @@ export const moduleAPI = {
 };
 
 /**
- * Competency API - Vollständig korrigiert
+ * Competency API
  */
 export const competencyAPI = {
-  // Grundlegende Funktionen
-  getAllCompetencies: createRetryFunction(() => api.get("/competencies")),
+  getAllCompetencies: createRetryWrapper(() => api.get("/competencies")),
 
-  getCompetency: createRetryFunction((competencyId) => {
-    if (!competencyId) {
-      throw new Error("Competency ID is required");
-    }
+  getCompetency: createRetryWrapper((competencyId) => {
+    if (!competencyId) throw new Error("Competency ID is required");
     return api.get(`/competencies/${competencyId}`);
   }),
 
-  // Neue Funktionen für Leistungsziele-Übersicht
-  getCompetencyOverview: createRetryFunction(() => {
-    return api.get("/competencies/overview");
-  }),
+  getCompetencyOverview: createRetryWrapper(() =>
+    api.get("/competencies/overview")
+  ),
 
-  getCompetenciesByArea: createRetryFunction((area) => {
-    if (!area) {
-      throw new Error("Area parameter is required");
-    }
+  getCompetenciesByArea: createRetryWrapper((area) => {
+    if (!area) throw new Error("Area parameter is required");
     return api.get(`/competencies/area/${area.toLowerCase()}`);
   }),
 
-  searchCompetencies: createRetryFunction((query) => {
+  searchCompetencies: createRetryWrapper((query) => {
     if (!query || query.trim().length < 2) {
       throw new Error("Search query must be at least 2 characters");
     }
-    return api.get("/competencies/search", {
-      params: { q: query.trim() },
-    });
-  }),
-
-  getCompetencyProgress: createRetryFunction((competencyId, userId) => {
-    if (!competencyId) {
-      throw new Error("Competency ID is required");
-    }
-    const params = userId ? `?userId=${userId}` : "";
-    return api.get(`/competencies/${competencyId}/progress${params}`);
+    return api.get("/competencies/search", { params: { q: query.trim() } });
   }),
 };
 
+// ========================================
+// HELPER FUNCTIONS
+// ========================================
+
 /**
- * Helper-Funktionen für Leistungsziele
+ * Competency Helper Functions
  */
 export const competencyHelpers = {
-  /**
-   * Formatiert Handlungskompetenzbereich für Anzeige
-   * @param {string} area - Bereich (a-h)
-   * @returns {Object} Formatierte Bereichsinformationen
-   */
   formatArea: (area) => {
     const areaMap = {
-      a: {
-        code: "A",
-        title: "Begleiten von ICT-Projekten",
-        description: "Projektmanagement und Stakeholder-Betreuung",
-        color: "primary",
-      },
+      a: { code: "A", title: "Begleiten von ICT-Projekten", color: "primary" },
       b: {
         code: "B",
         title: "Betreiben und Erweitern von ICT-Lösungen",
-        description: "Support und Wartung von ICT-Systemen",
         color: "secondary",
       },
       c: {
         code: "C",
         title: "Aufbauen und Pflegen von digitalen Daten",
-        description: "Datenmanagement und Datenbankentwicklung",
         color: "accent",
       },
       d: {
         code: "D",
         title: "Gewährleisten der Informationssicherheit",
-        description: "Sicherheitskonzepte und Datenschutz",
         color: "warning",
       },
       e: {
         code: "E",
         title: "Entwickeln und Bereitstellen von ICT-Lösungen",
-        description: "Software-Entwicklung und Deployment",
         color: "info",
       },
       f: {
         code: "F",
         title: "Definieren und Implementieren von ICT-Prozessen",
-        description: "Prozessoptimierung und Automatisierung",
         color: "success",
       },
-      g: {
-        code: "G",
-        title: "Entwickeln von Applikationen",
-        description: "Fachrichtung: Applikationsentwicklung",
-        color: "primary",
-      },
+      g: { code: "G", title: "Entwickeln von Applikationen", color: "primary" },
       h: {
         code: "H",
         title: "Ausliefern und Betreiben von Applikationen",
-        description: "Fachrichtung: DevOps und Betrieb",
         color: "secondary",
       },
     };
 
     return (
-      areaMap[area.toLowerCase()] || {
-        code: area.toUpperCase(),
-        title: `Handlungskompetenzbereich ${area.toUpperCase()}`,
-        description: "Unbekannter Bereich",
+      areaMap[area?.toLowerCase()] || {
+        code: area?.toUpperCase() || "?",
+        title: `Handlungskompetenzbereich ${
+          area?.toUpperCase() || "Unbekannt"
+        }`,
         color: "neutral",
       }
     );
   },
 
-  /**
-   * Formatiert Taxonomiestufe für Anzeige
-   * @param {string} taxonomy - Taxonomiestufe (K1-K6)
-   * @returns {Object} Formatierte Taxonomie-Informationen
-   */
   formatTaxonomy: (taxonomy) => {
     const taxonomyMap = {
       K1: {
@@ -550,34 +504,29 @@ export const competencyHelpers = {
     return (
       taxonomyMap[taxonomy] || {
         level: 0,
-        title: taxonomy,
+        title: taxonomy || "Unbekannt",
         description: "Unbekannte Taxonomiestufe",
       }
     );
   },
 
-  /**
-   * Berechnet Abdeckungsstatistiken
-   * @param {Array} competencies - Array von Leistungszielen
-   * @returns {Object} Statistiken
-   */
   calculateCoverageStats: (competencies) => {
+    if (!Array.isArray(competencies))
+      return { total: 0, covered: 0, uncovered: 0, percentage: 0 };
+
     const total = competencies.length;
-    const covered = competencies.filter((c) => c.isCovered).length;
+    const covered = competencies.filter((c) => c?.isCovered).length;
     const uncovered = total - covered;
     const percentage = total > 0 ? Math.round((covered / total) * 100) : 0;
 
     return { total, covered, uncovered, percentage };
   },
 
-  /**
-   * Gruppiert Leistungsziele nach Bereich
-   * @param {Array} competencies - Array von Leistungszielen
-   * @returns {Object} Nach Bereichen gruppierte Leistungsziele
-   */
   groupByArea: (competencies) => {
+    if (!Array.isArray(competencies)) return {};
+
     return competencies.reduce((groups, competency) => {
-      const area = competency.area.toUpperCase();
+      const area = competency?.area?.toUpperCase() || "UNKNOWN";
       if (!groups[area]) {
         groups[area] = [];
       }
@@ -588,37 +537,28 @@ export const competencyHelpers = {
 };
 
 // ========================================
-// UTILITY FUNCTIONS FOR COMPONENTS
+// UTILITY APIS
 // ========================================
 
-/**
- * Health Check Utility
- */
 export const healthAPI = {
-  check: createRetryFunction(() => api.get("/health")),
-  ping: createRetryFunction(() => api.get("/ping")),
+  check: createRetryWrapper(() => api.get("/health")),
+  ping: createRetryWrapper(() => api.get("/ping")),
 };
 
-/**
- * Generic API Helper für Custom Requests
- */
 export const apiHelper = {
-  get: createRetryFunction((url, config) => api.get(url, config)),
-  post: createRetryFunction((url, data, config) => api.post(url, data, config)),
-  put: createRetryFunction((url, data, config) => api.put(url, data, config)),
-  patch: createRetryFunction((url, data, config) =>
+  get: createRetryWrapper((url, config) => api.get(url, config)),
+  post: createRetryWrapper((url, data, config) => api.post(url, data, config)),
+  put: createRetryWrapper((url, data, config) => api.put(url, data, config)),
+  patch: createRetryWrapper((url, data, config) =>
     api.patch(url, data, config)
   ),
-  delete: createRetryFunction((url, config) => api.delete(url, config)),
+  delete: createRetryWrapper((url, config) => api.delete(url, config)),
 };
 
-/**
- * Token Utilities für Components
- */
 export const tokenUtils = {
   isAuthenticated: () => !!TokenManager.getToken(),
-  getToken: TokenManager.getToken,
-  removeToken: TokenManager.removeToken,
+  getToken: TokenManager.getToken.bind(TokenManager),
+  removeToken: TokenManager.removeToken.bind(TokenManager),
   isTokenExpiring: () => {
     const token = TokenManager.getToken();
     return TokenManager.isTokenExpiringSoon(token);
@@ -626,20 +566,13 @@ export const tokenUtils = {
 };
 
 // ========================================
-// ERROR HANDLING UTILITIES
+// ERROR HANDLING
 // ========================================
 
-/**
- * Zentrale Error-Handler
- */
 export const errorHandler = {
-  /**
-   * Standard API Error Handler
-   */
   handleApiError: (error, context = "API Call") => {
     console.error(`${context} failed:`, error);
 
-    // Strukturiertes Error-Objekt zurückgeben
     return {
       message:
         error.response?.data?.message ||
@@ -651,9 +584,6 @@ export const errorHandler = {
     };
   },
 
-  /**
-   * Network Error Handler
-   */
   handleNetworkError: (error) => {
     if (error.code === "ECONNABORTED") {
       return {
@@ -673,7 +603,7 @@ export const errorHandler = {
       };
     }
 
-    return errorHandler.handleApiError(error, "Network");
+    return this.handleApiError(error, "Network");
   },
 };
 
@@ -682,23 +612,11 @@ export const errorHandler = {
 // ========================================
 
 if (import.meta.env.DEV) {
-  // Request-Logging für Development
-  api.interceptors.request.use((config) => {
-    console.log(
-      `🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`,
-      {
-        data: config.data,
-        params: config.params,
-      }
-    );
-    return config;
-  });
-
-  // Global Error Logging
+  // Unhandled Promise Rejection Logging
   window.addEventListener("unhandledrejection", (event) => {
     if (event.reason?.isAxiosError) {
       console.error(
-        "🔥 Unhandled API Error:",
+        "Unhandled API Error:",
         errorHandler.handleApiError(event.reason)
       );
     }
@@ -709,8 +627,5 @@ if (import.meta.env.DEV) {
 // EXPORTS
 // ========================================
 
-// Default Export: Konfigurierte Axios-Instanz
 export default api;
-
-// Named Exports: Alle APIs und Utilities
 export { API_CONFIG, TokenManager, RequestQueue };
