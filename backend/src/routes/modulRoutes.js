@@ -3,11 +3,10 @@ import {
   getAllModules,
   getModulesWithProgress,
 } from "../controllers/modulController.js";
-import { authenticate } from "../middleware/auth.js";
 
 const router = express.Router();
 
 router.get("/", getAllModules); // Public route for all modules
-router.get("/with-progress", authenticate, getModulesWithProgress); // Authenticated route with progress
+router.get("/with-progress", getModulesWithProgress);
 
 export default router;

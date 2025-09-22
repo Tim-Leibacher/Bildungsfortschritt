@@ -1,34 +1,22 @@
-// backend/src/routes/authRoutes.js
-import express from "express";
-import {
-  register,
-  login,
-  logout,
-  refreshToken,
-  getCurrentUser,
-} from "../controllers/authController.js";
-import { authenticate } from "../middleware/auth.js";
-import {
-  registerValidation,
-  loginValidation,
-  checkValidation,
-} from "../middleware/validation.js";
+import { verifySignup } from "../middleware/verifySignUp.js";
+import * as authController from "../controllers/authController.js";
 
-const router = express.Router();
+export default function setupAuthRoutes(app) {
+  app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept");
+    next();
+  });
 
-// Registrierung mit Validierung
-router.post("/register", registerValidation, checkValidation, register);
+  app.post(
+    "/auth/signup",
+    [
+      verifySignup.checkDuplicateUsernameOrEmail,
+      verifySignup.checkRolesExisted,
+    ],
+    authController.signup
+  );
 
-// Login mit Validierung
-router.post("/login", loginValidation, checkValidation, login);
+  app.post("/auth/signin", authController.signin);
 
-// Logout (kein Validierung erforderlich)
-router.post("/logout", logout);
-
-// Token refresh (kein Body-Validierung erforderlich)
-router.post("/refresh", refreshToken);
-
-// Aktueller User (authentifiziert)
-router.get("/me", authenticate, getCurrentUser);
-
-export default router;
+  app.post("/auth/signout", authController.signout);
+}

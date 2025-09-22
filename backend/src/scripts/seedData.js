@@ -14,7 +14,19 @@ dotenv.config({ path: join(__dirname, "../../.env") });
 import User from "../models/User.js";
 import Competency from "../models/Competency.js";
 import Modul from "../models/Modul.js";
+import Role from "../models/Role.js";
 import { connectDB } from "../../config/db.js";
+
+/**
+ * ==========================================
+ * STANDARD-ROLLEN
+ * ==========================================
+ */
+const roles = [
+  { name: "admin" },
+  { name: "berufsbildner" },
+  { name: "lernender" },
+];
 
 /**
  * ==========================================
@@ -723,8 +735,9 @@ const seedData = async () => {
     const existingCompetencies = await Competency.countDocuments();
     const existingModules = await Modul.countDocuments();
     const existingUsers = await User.countDocuments();
+    const existingRoles = await Role.countDocuments();
 
-    if (existingCompetencies > 0 || existingModules > 0 || existingUsers > 0) {
+    if (existingCompetencies > 0 || existingModules > 0 || existingUsers > 0 || existingRoles > 0) {
       console.log(
         "⚠️  Datenbank enthält bereits Daten. Lösche alle vorhandenen Daten..."
       );
@@ -732,11 +745,25 @@ const seedData = async () => {
       await User.deleteMany({});
       await Modul.deleteMany({});
       await Competency.deleteMany({});
+      await Role.deleteMany({});
       console.log("🗑️  Alle vorhandenen Daten wurden gelöscht");
     }
 
     // ===========================================
-    // 1. HANDLUNGSKOMPETENZEN ERSTELLEN
+    // 1. ROLLEN ERSTELLEN
+    // ===========================================
+    console.log("🎭 Erstelle Standard-Rollen...");
+    const createdRoles = await Role.insertMany(roles);
+    console.log(`✅ ${createdRoles.length} Rollen erstellt`);
+
+    // Map für einfache Referenzierung erstellen
+    const roleMap = {};
+    createdRoles.forEach((role) => {
+      roleMap[role.name] = role._id;
+    });
+
+    // ===========================================
+    // 2. HANDLUNGSKOMPETENZEN ERSTELLEN
     // ===========================================
     console.log("📚 Erstelle Handlungskompetenzen...");
     const createdCompetencies = await Competency.insertMany(competencies);
@@ -967,6 +994,7 @@ const seedData = async () => {
     console.log("=".repeat(60));
 
     console.log("\n📊 ERSTELLTE DATEN:");
+    console.log(`   🎭 Rollen: ${createdRoles.length}`);
     console.log(`   📚 Handlungskompetenzen: ${createdCompetencies.length}`);
     console.log(`   🏗️  Module: ${createdModules.length}`);
     console.log(

@@ -1,11 +1,14 @@
-import mongoose from "mongoose"
-
-export const connectDB = async () => {
-    try {
-        await mongoose.connect(process.env.MONGO_URI);
-        console.log("MongoDB connected");
-    } catch (err) {
-        console.error(` MongoDB Error: ${err.message}`);
-        process.exit(1);
-    }
+export default {
+  HOST: "192.168.11.20",
+  USER: "postgres",
+  PASSWORD: "postgres",
+  DB: "bildungsfortschritt",
+  dialect: "postgres",
+  PORT: 5432,
+  pool: {
+    max: 5,
+    min: 0,
+    acquire: 30000,
+    idle: 10000,
+  },
 };

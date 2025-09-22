@@ -1,291 +1,179 @@
-// backend/src/routes/competencyRoutes.js
+/**
+ * =============================================================================
+ * COMPETENCY ROUTES
+ * =============================================================================
+ * Bereitstellung von API-Endpunkten für Leistungsziele-Verwaltung
+ * - Übersicht der Leistungsziele-Abdeckung (nur Berufsbildner)
+ * - Leistungsziele nach Handlungskompetenzbereich
+ * - Such- und Filterfunktionen
+ * =============================================================================
+ */
+
 import express from "express";
 import Competency from "../models/Competency.js";
 import Modul from "../models/Modul.js";
-import { authenticate, authorize } from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.get("/debug", authenticate, authorize("BB"), async (req, res) => {
-  try {
-    console.log("🔍 DEBUG: Testing response structure...");
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
 
-    const testData = {
-      overview: {
-        totalCompetencies: 45,
-        coveredCount: 38,
-        uncoveredCount: 7,
-        coveragePercentage: 84,
-      },
-      areaStats: {
-        A: { total: 5, covered: 4, uncovered: 1, percentage: 80 },
-        B: { total: 2, covered: 2, uncovered: 0, percentage: 100 },
-      },
-      competenciesByArea: {
-        A: [
-          {
-            _id: "test123",
-            code: "A1.1",
-            title: "Test Kompetenz",
-            isCovered: true,
-            modules: [],
-          },
-        ],
-      },
-    };
+/**
+ * Validiert den Handlungskompetenzbereich
+ * @param {string} area - Bereichs-Bezeichnung (a-h)
+ * @returns {boolean} Gültigkeit des Bereichs
+ */
+const isValidArea = (area) => {
+  return area && /^[a-h]$/i.test(area);
+};
 
-    console.log("📤 Sending test response:", testData);
+/**
+ * Erstellt Mapping zwischen Leistungszielen und Modulen
+ * @param {Array} modules - Array von Modulen mit Leistungszielen
+ * @returns {Object} Mapping-Objekt
+ */
+const createCompetencyModuleMapping = (modules) => {
+  const mapping = {};
+  const coveredCompetencies = new Set();
 
-    res.status(200).json({
-      success: true,
-      data: testData,
-      message: "Debug test",
-    });
-  } catch (error) {
-    console.error("Debug error:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+  modules.forEach((module) => {
+    if (!Array.isArray(module.competencies)) return;
 
-// ============================================================================
-// KORRIGIERTE OVERVIEW ROUTE
-// ============================================================================
-
-router.get("/overview", authenticate, authorize("BB"), async (req, res) => {
-  try {
-    console.log("🔍 Starting competency overview generation...");
-
-    // 1. Alle Leistungsziele laden
-    const allCompetencies = await Competency.find({})
-      .sort({ area: 1, code: 1 })
-      .lean();
-
-    console.log(`📊 Found ${allCompetencies.length} competencies`);
-
-    // 2. Alle Module mit ihren Leistungszielen laden
-    const allModules = await Modul.find({})
-      .populate("competencies", "code title area taxonomy")
-      .lean();
-
-    console.log(`📚 Found ${allModules.length} modules`);
-
-    // Early return if no data
-    if (!allCompetencies.length) {
-      const emptyResponse = {
-        overview: {
-          totalCompetencies: 0,
-          coveredCount: 0,
-          uncoveredCount: 0,
-          coveragePercentage: 0,
-        },
-        areaStats: {},
-        competenciesByArea: {},
-        modules: [],
-      };
-
-      console.log("📤 Sending empty response:", emptyResponse);
-
-      return res.status(200).json({
-        success: true,
-        data: emptyResponse,
-        message: "Keine Leistungsziele gefunden",
-      });
-    }
-
-    // 3. Mapping: Welche Leistungsziele werden von welchen Modulen abgedeckt
-    const competencyModuleMapping = {};
-    const coveredCompetencies = new Set();
-
-    allModules.forEach((module) => {
-      if (Array.isArray(module.competencies)) {
-        module.competencies.forEach((competency) => {
-          if (competency && competency._id) {
-            const competencyId = competency._id.toString();
-
-            if (!competencyModuleMapping[competencyId]) {
-              competencyModuleMapping[competencyId] = [];
-            }
-
-            competencyModuleMapping[competencyId].push({
-              _id: module._id,
-              code: module.code,
-              title: module.title,
-              type: module.type,
-            });
-
-            coveredCompetencies.add(competencyId);
-          }
-        });
-      }
-    });
-
-    console.log(`🔗 Mapped ${coveredCompetencies.size} covered competencies`);
-
-    // 4. Gruppierung nach Handlungskompetenzbereichen
-    const competenciesByArea = {};
-    allCompetencies.forEach((competency) => {
-      const area = competency.area.toUpperCase();
-      if (!competenciesByArea[area]) {
-        competenciesByArea[area] = [];
-      }
+    module.competencies.forEach((competency) => {
+      if (!competency?._id) return;
 
       const competencyId = competency._id.toString();
-      const isCovered = coveredCompetencies.has(competencyId);
 
-      competenciesByArea[area].push({
-        _id: competency._id,
-        code: competency.code,
-        title: competency.title,
-        description: competency.description,
-        area: competency.area,
-        taxonomy: competency.taxonomy,
-        isCovered,
-        modules: competencyModuleMapping[competencyId] || [],
-        moduleCount: competencyModuleMapping[competencyId]?.length || 0,
+      if (!mapping[competencyId]) {
+        mapping[competencyId] = [];
+      }
+
+      mapping[competencyId].push({
+        _id: module._id,
+        code: module.code,
+        title: module.title,
+        type: module.type,
       });
+
+      coveredCompetencies.add(competencyId);
     });
+  });
 
-    console.log(
-      `📋 Grouped into ${Object.keys(competenciesByArea).length} areas`
-    );
+  return { mapping, coveredCompetencies };
+};
 
-    // 5. Statistiken berechnen
-    const totalCompetencies = allCompetencies.length;
-    const coveredCount = coveredCompetencies.size;
-    const uncoveredCount = totalCompetencies - coveredCount;
-    const coveragePercentage =
-      totalCompetencies > 0
-        ? Math.round((coveredCount / totalCompetencies) * 100)
-        : 0;
+/**
+ * Berechnet Statistiken pro Handlungskompetenzbereich
+ * @param {Array} competencies - Array aller Leistungsziele
+ * @param {Set} coveredCompetencies - Set abgedeckter Leistungsziele
+ * @returns {Object} Statistiken pro Bereich
+ */
+const calculateAreaStats = (competencies, coveredCompetencies) => {
+  const areaStats = {};
 
-    // 6. Statistiken pro Bereich
-    const areaStats = {};
-    Object.keys(competenciesByArea).forEach((area) => {
-      const areaCompetencies = competenciesByArea[area];
-      const areaCovered = areaCompetencies.filter((c) => c.isCovered).length;
-      const areaTotal = areaCompetencies.length;
+  competencies.forEach((competency) => {
+    const area = competency.area.toUpperCase();
+    const competencyId = competency._id.toString();
+    const isCovered = coveredCompetencies.has(competencyId);
 
-      areaStats[area] = {
-        total: areaTotal,
-        covered: areaCovered,
-        uncovered: areaTotal - areaCovered,
-        percentage:
-          areaTotal > 0 ? Math.round((areaCovered / areaTotal) * 100) : 0,
-      };
+    if (!areaStats[area]) {
+      areaStats[area] = { total: 0, covered: 0, uncovered: 0, percentage: 0 };
+    }
+
+    areaStats[area].total++;
+    if (isCovered) {
+      areaStats[area].covered++;
+    } else {
+      areaStats[area].uncovered++;
+    }
+  });
+
+  // Prozentsätze berechnen
+  Object.keys(areaStats).forEach((area) => {
+    const { total, covered } = areaStats[area];
+    areaStats[area].percentage =
+      total > 0 ? Math.round((covered / total) * 100) : 0;
+  });
+
+  return areaStats;
+};
+
+/**
+ * Gruppiert Leistungsziele nach Bereichen mit Modul-Informationen
+ * @param {Array} competencies - Array aller Leistungsziele
+ * @param {Object} competencyMapping - Mapping zu Modulen
+ * @returns {Object} Gruppierte Leistungsziele
+ */
+const groupCompetenciesByArea = (competencies, competencyMapping) => {
+  const grouped = {};
+
+  competencies.forEach((competency) => {
+    const area = competency.area.toUpperCase();
+    const competencyId = competency._id.toString();
+
+    if (!grouped[area]) {
+      grouped[area] = [];
+    }
+
+    const modules = competencyMapping[competencyId] || [];
+    grouped[area].push({
+      ...competency,
+      modules,
+      isCovered: modules.length > 0,
     });
+  });
 
-    // 7. Module Overview
-    const moduleOverview = allModules.map((module) => ({
-      _id: module._id,
-      code: module.code,
-      title: module.title,
-      type: module.type,
-      competencyCount: Array.isArray(module.competencies)
-        ? module.competencies.length
-        : 0,
-      competencies: Array.isArray(module.competencies)
-        ? module.competencies.map((c) => ({
-            _id: c._id,
-            code: c.code,
-            title: c.title,
-            area: c.area,
-            taxonomy: c.taxonomy,
-          }))
-        : [],
-    }));
+  return grouped;
+};
 
-    // 8. Response zusammenstellen - KRITISCH: Korrekte Struktur!
-    const responseData = {
-      overview: {
-        totalCompetencies,
-        coveredCount,
-        uncoveredCount,
-        coveragePercentage,
-      },
-      areaStats,
-      competenciesByArea,
-      modules: moduleOverview,
-    };
+/**
+ * Erstellt Module-Übersicht mit Leistungszielen
+ * @param {Array} modules - Array aller Module
+ * @returns {Array} Module-Übersicht
+ */
+const createModuleOverview = (modules) => {
+  return modules.map((module) => ({
+    _id: module._id,
+    code: module.code,
+    title: module.title,
+    type: module.type,
+    competencyCount: Array.isArray(module.competencies)
+      ? module.competencies.length
+      : 0,
+    competencies: Array.isArray(module.competencies)
+      ? module.competencies.map((competency) => ({
+          _id: competency._id,
+          code: competency.code,
+          title: competency.title,
+          area: competency.area,
+          taxonomy: competency.taxonomy,
+        }))
+      : [],
+  }));
+};
 
-    console.log("📤 FINAL RESPONSE STRUCTURE:");
-    console.log(
-      "- overview:",
-      !!responseData.overview,
-      Object.keys(responseData.overview || {})
-    );
-    console.log(
-      "- areaStats:",
-      !!responseData.areaStats,
-      Object.keys(responseData.areaStats || {})
-    );
-    console.log(
-      "- competenciesByArea:",
-      !!responseData.competenciesByArea,
-      Object.keys(responseData.competenciesByArea || {})
-    );
-    console.log("- modules count:", responseData.modules?.length || 0);
-
-    console.log("✅ Overview generated successfully:", {
-      totalCompetencies,
-      coveredCount,
-      areasCount: Object.keys(areaStats).length,
-    });
-
-    // WICHTIG: Die Response-Struktur muss genau so sein!
-    const finalResponse = {
-      success: true,
-      data: responseData,
-      message: "Leistungsziele-Übersicht erfolgreich geladen",
-    };
-
-    console.log("📤 Sending final response with structure:", {
-      hasSuccess: !!finalResponse.success,
-      hasData: !!finalResponse.data,
-      dataKeys: finalResponse.data ? Object.keys(finalResponse.data) : [],
-    });
-
-    res.status(200).json(finalResponse);
-  } catch (error) {
-    console.error("❌ Error in competency overview:", error);
-    res.status(500).json({
-      success: false,
-      message: "Fehler beim Laden der Leistungsziele-Übersicht",
-      error:
-        process.env.NODE_ENV === "development"
-          ? {
-              message: error.message,
-              stack: error.stack,
-            }
-          : undefined,
-    });
-  }
-});
+// =============================================================================
+// ROUTES
+// =============================================================================
 
 /**
  * @route   GET /api/competencies/overview
- * @desc    Get competency coverage overview for Berufsbildner
- * @access  Private (Berufsbildner only)
+ * @desc    Vollständige Übersicht aller Leistungsziele mit Abdeckungsstatistiken
+ * @access  Private (nur Berufsbildner)
  */
-router.get("/overview", authenticate, authorize("BB"), async (req, res) => {
+router.get("/overview", async (req, res) => {
   try {
-    console.log("🔍 Starting competency overview generation...");
+    // 1. Daten aus der Datenbank laden
+    const [allCompetencies, allModules] = await Promise.all([
+      Competency.find({}).sort({ area: 1, code: 1 }).lean(),
+      Modul.find({})
+        .populate("competencies", "code title area taxonomy")
+        .lean(),
+    ]);
 
-    // 1. Alle Leistungsziele laden
-    const allCompetencies = await Competency.find({})
-      .sort({ area: 1, code: 1 })
-      .lean();
-
-    console.log(`📊 Found ${allCompetencies.length} competencies`);
-
-    // 2. Alle Module mit ihren Leistungszielen laden
-    const allModules = await Modul.find({})
-      .populate("competencies", "code title area taxonomy")
-      .lean();
-
-    console.log(`📚 Found ${allModules.length} modules`);
-
-    // Early return if no data
-    if (!allCompetencies.length) {
+    // 2. Leere Antwort wenn keine Daten vorhanden
+    if (allCompetencies.length === 0) {
       return res.status(200).json({
         success: true,
         data: {
@@ -298,114 +186,40 @@ router.get("/overview", authenticate, authorize("BB"), async (req, res) => {
           areaStats: {},
           competenciesByArea: {},
           modules: [],
+          metadata: {
+            generatedAt: new Date().toISOString(),
+            totalAreas: 0,
+          },
         },
         message: "Keine Leistungsziele gefunden",
       });
     }
 
-    // 3. Mapping: Welche Leistungsziele werden von welchen Modulen abgedeckt
-    const competencyModuleMapping = {};
-    const coveredCompetencies = new Set();
+    // 3. Mapping zwischen Leistungszielen und Modulen erstellen
+    const { mapping: competencyMapping, coveredCompetencies } =
+      createCompetencyModuleMapping(allModules);
 
-    allModules.forEach((module) => {
-      if (Array.isArray(module.competencies)) {
-        module.competencies.forEach((competency) => {
-          if (competency && competency._id) {
-            const competencyId = competency._id.toString();
-
-            if (!competencyModuleMapping[competencyId]) {
-              competencyModuleMapping[competencyId] = [];
-            }
-
-            competencyModuleMapping[competencyId].push({
-              _id: module._id,
-              code: module.code,
-              title: module.title,
-              type: module.type,
-            });
-
-            coveredCompetencies.add(competencyId);
-          }
-        });
-      }
-    });
-
-    console.log(`🔗 Mapped ${coveredCompetencies.size} covered competencies`);
-
-    // 4. Gruppierung nach Handlungskompetenzbereichen
-    const competenciesByArea = {};
-    allCompetencies.forEach((competency) => {
-      const area = competency.area.toUpperCase();
-      if (!competenciesByArea[area]) {
-        competenciesByArea[area] = [];
-      }
-
-      const competencyId = competency._id.toString();
-      const isCovered = coveredCompetencies.has(competencyId);
-
-      competenciesByArea[area].push({
-        _id: competency._id,
-        code: competency.code,
-        title: competency.title,
-        description: competency.description,
-        area: competency.area,
-        taxonomy: competency.taxonomy,
-        isCovered,
-        modules: competencyModuleMapping[competencyId] || [],
-        moduleCount: competencyModuleMapping[competencyId]?.length || 0,
-      });
-    });
-
-    console.log(
-      `📋 Grouped into ${Object.keys(competenciesByArea).length} areas`
-    );
-
-    // 5. Statistiken berechnen
+    // 4. Gesamtstatistiken berechnen
     const totalCompetencies = allCompetencies.length;
     const coveredCount = coveredCompetencies.size;
     const uncoveredCount = totalCompetencies - coveredCount;
-    const coveragePercentage =
-      totalCompetencies > 0
-        ? Math.round((coveredCount / totalCompetencies) * 100)
-        : 0;
+    const coveragePercentage = Math.round(
+      (coveredCount / totalCompetencies) * 100
+    );
 
-    // 6. Statistiken pro Bereich
-    const areaStats = {};
-    Object.keys(competenciesByArea).forEach((area) => {
-      const areaCompetencies = competenciesByArea[area];
-      const areaCovered = areaCompetencies.filter((c) => c.isCovered).length;
-      const areaTotal = areaCompetencies.length;
+    // 5. Statistiken pro Handlungskompetenzbereich
+    const areaStats = calculateAreaStats(allCompetencies, coveredCompetencies);
 
-      areaStats[area] = {
-        total: areaTotal,
-        covered: areaCovered,
-        uncovered: areaTotal - areaCovered,
-        percentage:
-          areaTotal > 0 ? Math.round((areaCovered / areaTotal) * 100) : 0,
-      };
-    });
+    // 6. Leistungsziele nach Bereichen gruppieren
+    const competenciesByArea = groupCompetenciesByArea(
+      allCompetencies,
+      competencyMapping
+    );
 
-    // 7. Module Overview
-    const moduleOverview = allModules.map((module) => ({
-      _id: module._id,
-      code: module.code,
-      title: module.title,
-      type: module.type,
-      competencyCount: Array.isArray(module.competencies)
-        ? module.competencies.length
-        : 0,
-      competencies: Array.isArray(module.competencies)
-        ? module.competencies.map((c) => ({
-            _id: c._id,
-            code: c.code,
-            title: c.title,
-            area: c.area,
-            taxonomy: c.taxonomy,
-          }))
-        : [],
-    }));
+    // 7. Module-Übersicht erstellen
+    const moduleOverview = createModuleOverview(allModules);
 
-    // 8. Response zusammenstellen - KRITISCH: Korrekte Struktur!
+    // 8. Response-Daten zusammenstellen
     const responseData = {
       overview: {
         totalCompetencies,
@@ -422,20 +236,14 @@ router.get("/overview", authenticate, authorize("BB"), async (req, res) => {
       },
     };
 
-    console.log("✅ Overview generated successfully:", {
-      totalCompetencies,
-      coveredCount,
-      areasCount: Object.keys(areaStats).length,
-    });
-
-    // WICHTIG: success: true und data-Struktur muss stimmen!
+    // Erfolgreiche Antwort senden
     res.status(200).json({
       success: true,
       data: responseData,
       message: "Leistungsziele-Übersicht erfolgreich geladen",
     });
   } catch (error) {
-    console.error("❌ Error in competency overview:", error);
+    // Fehlerbehandlung
     res.status(500).json({
       success: false,
       message: "Fehler beim Laden der Leistungsziele-Übersicht",
@@ -452,50 +260,56 @@ router.get("/overview", authenticate, authorize("BB"), async (req, res) => {
 
 /**
  * @route   GET /api/competencies/area/:area
- * @desc    Get competencies by area with module information
- * @access  Private
+ * @desc    Leistungsziele eines spezifischen Handlungskompetenzbereichs
+ * @access  Private (alle authentifizierten Benutzer)
+ * @param   {string} area - Handlungskompetenzbereich (a-h)
  */
-router.get("/area/:area", authenticate, async (req, res) => {
+router.get("/area/:area", async (req, res) => {
   try {
     const { area } = req.params;
 
-    if (!area || !/^[a-h]$/i.test(area)) {
+    // Bereichs-Validierung
+    if (!isValidArea(area)) {
       return res.status(400).json({
         success: false,
         message: "Ungültiger Bereich. Erlaubt sind: a-h",
       });
     }
 
+    // Leistungsziele des Bereichs laden
     const competencies = await Competency.find({
       area: area.toLowerCase(),
     })
       .sort({ code: 1 })
       .lean();
 
+    // Module laden, die diese Leistungsziele abdecken
     const modules = await Modul.find({
       competencies: { $in: competencies.map((c) => c._id) },
     })
       .populate("competencies", "code title")
       .lean();
 
+    // Mapping zwischen Leistungszielen und Modulen erstellen
     const competencyModuleMap = {};
     modules.forEach((module) => {
-      if (Array.isArray(module.competencies)) {
-        module.competencies.forEach((comp) => {
-          const compId = comp._id.toString();
-          if (!competencyModuleMap[compId]) {
-            competencyModuleMap[compId] = [];
-          }
-          competencyModuleMap[compId].push({
-            _id: module._id,
-            code: module.code,
-            title: module.title,
-            type: module.type,
-          });
+      if (!Array.isArray(module.competencies)) return;
+
+      module.competencies.forEach((comp) => {
+        const compId = comp._id.toString();
+        if (!competencyModuleMap[compId]) {
+          competencyModuleMap[compId] = [];
+        }
+        competencyModuleMap[compId].push({
+          _id: module._id,
+          code: module.code,
+          title: module.title,
+          type: module.type,
         });
-      }
+      });
     });
 
+    // Leistungsziele mit Modul-Informationen anreichern
     const enrichedCompetencies = competencies.map((comp) => ({
       ...comp,
       modules: competencyModuleMap[comp._id.toString()] || [],
@@ -505,12 +319,130 @@ router.get("/area/:area", authenticate, async (req, res) => {
     res.status(200).json({
       success: true,
       data: enrichedCompetencies,
+      message: `Leistungsziele für Bereich ${area.toUpperCase()} erfolgreich geladen`,
     });
   } catch (error) {
-    console.error("Error fetching competencies by area:", error);
     res.status(500).json({
       success: false,
       message: "Fehler beim Laden der Leistungsziele",
+      error:
+        process.env.NODE_ENV === "development"
+          ? {
+              message: error.message,
+              stack: error.stack,
+            }
+          : undefined,
+    });
+  }
+});
+
+/**
+ * @route   GET /api/competencies
+ * @desc    Alle Leistungsziele (optional mit Suchparametern)
+ * @access  Private (alle authentifizierten Benutzer)
+ * @query   {string} search - Suchbegriff für Titel/Beschreibung
+ * @query   {string} area - Filter nach Handlungskompetenzbereich
+ * @query   {string} taxonomy - Filter nach Taxonomie-Stufe
+ */
+router.get("/", async (req, res) => {
+  try {
+    const { search, area, taxonomy } = req.query;
+    const filter = {};
+
+    // Filter aufbauen
+    if (area && isValidArea(area)) {
+      filter.area = area.toLowerCase();
+    }
+
+    if (taxonomy) {
+      filter.taxonomy = taxonomy.toUpperCase();
+    }
+
+    // Basis-Query
+    let query = Competency.find(filter).sort({ area: 1, code: 1 });
+
+    // Textsuche hinzufügen
+    if (search && search.trim().length >= 2) {
+      const searchRegex = new RegExp(search.trim(), "i");
+      query = query.find({
+        $or: [
+          { title: searchRegex },
+          { description: searchRegex },
+          { code: searchRegex },
+        ],
+      });
+    }
+
+    const competencies = await query.lean();
+
+    res.status(200).json({
+      success: true,
+      data: competencies,
+      message: `${competencies.length} Leistungsziele gefunden`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Fehler beim Laden der Leistungsziele",
+      error:
+        process.env.NODE_ENV === "development"
+          ? {
+              message: error.message,
+              stack: error.stack,
+            }
+          : undefined,
+    });
+  }
+});
+
+/**
+ * @route   GET /api/competencies/:id
+ * @desc    Einzelnes Leistungsziel mit Details
+ * @access  Private (alle authentifizierten Benutzer)
+ * @param   {string} id - Leistungsziel-ID
+ */
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const competency = await Competency.findById(id).lean();
+
+    if (!competency) {
+      return res.status(404).json({
+        success: false,
+        message: "Leistungsziel nicht gefunden",
+      });
+    }
+
+    // Module laden, die dieses Leistungsziel abdecken
+    const modules = await Modul.find({
+      competencies: id,
+    })
+      .select("code title type description duration")
+      .lean();
+
+    const enrichedCompetency = {
+      ...competency,
+      modules,
+      isCovered: modules.length > 0,
+    };
+
+    res.status(200).json({
+      success: true,
+      data: enrichedCompetency,
+      message: "Leistungsziel erfolgreich geladen",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Fehler beim Laden des Leistungsziels",
+      error:
+        process.env.NODE_ENV === "development"
+          ? {
+              message: error.message,
+              stack: error.stack,
+            }
+          : undefined,
     });
   }
 });

@@ -2,58 +2,25 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 
-// Moderne E-Mail-Validierung die Umlaute und internationale Zeichen unterstützt
-const emailValidation = {
-  type: String,
-  required: [true, "E-Mail-Adresse ist erforderlich"],
-  unique: true,
-  lowercase: true,
-  trim: true,
-  validate: {
-    validator: function (email) {
-      // RFC 5322 konforme E-Mail-Validierung mit Unicode-Unterstützung
-      const emailRegex =
-        /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-
-      // Alternative: Modernere Unicode-bewusste Regex
-      const unicodeEmailRegex =
-        /^[\w.!#$%&'*+/=?^`{|}~\u00C0-\u017F-]+@[a-zA-Z0-9\u00C0-\u017F](?:[a-zA-Z0-9\u00C0-\u017F-]{0,61}[a-zA-Z0-9\u00C0-\u017F])?(?:\.[a-zA-Z0-9\u00C0-\u017F](?:[a-zA-Z0-9\u00C0-\u017F-]{0,61}[a-zA-Z0-9\u00C0-\u017F])?)*$/;
-
-      // Verwende die Unicode-bewusste Validierung
-      return unicodeEmailRegex.test(email);
-    },
-    message:
-      "Bitte geben Sie eine gültige E-Mail-Adresse ein. Umlaute (ä, ö, ü) sind vor dem @ erlaubt.",
-  },
-};
-
 const userSchema = new mongoose.Schema(
   {
-    email: emailValidation,
+    email: {
+      type: String,
+      required: [true, "Mail ist erforderlich"],
+    },
     password: {
       type: String,
       required: [true, "Passwort ist erforderlich"],
       minlength: [6, "Passwort muss mindestens 6 Zeichen lang sein"],
     },
-    isBB: {
-      type: Boolean,
-      required: true,
-      default: false,
-    },
-    firstName: {
-      type: String,
-      trim: true,
-      maxlength: [50, "Vorname darf maximal 50 Zeichen lang sein"],
-    },
-    lastName: {
-      type: String,
-      trim: true,
-      maxlength: [50, "Nachname darf maximal 50 Zeichen lang sein"],
-    },
+    roles: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Role",
+      },
+    ],
     lehrjahr: {
       type: Number,
-      min: [1, "Lehrjahr muss mindestens 1 sein"],
-      max: [4, "Lehrjahr darf maximal 4 sein"],
     },
     berufsbildner: [
       {
@@ -67,23 +34,13 @@ const userSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
-    completedModules: [
-      {
-        module: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "Modul",
-        },
-        completedAt: { type: Date, default: Date.now },
-      },
-    ],
   },
   {
     timestamps: true,
     // Verbesserte Index-Konfiguration
     indexes: [
       { email: 1 }, // Eindeutiger Index für E-Mail
-      { isBB: 1 }, // Index für schnelle BB-Abfragen
-      { berufsbildner: 1 }, // Index für BB-Student-Zuordnungen
+      { role: 1 }, // Index für schnelle BB-Abfragen
     ],
   }
 );

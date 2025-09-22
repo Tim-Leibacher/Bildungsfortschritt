@@ -1,267 +1,90 @@
-// backend/src/controllers/authController.js
-import User from "../models/User.js";
-import {
-  generateAccessToken,
-  generateRefreshToken,
-  verifyRefreshToken,
-} from "../util/jwt.js";
-import { normalizeGermanEmail } from "../middleware/validation.js";
+import db from "../models/index.js";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 
-export const register = async (req, res) => {
+const handleError = (res, error, statusCode = 500) => {
+  return res.status(statusCode).send({ message: error.message || error });
+};
+
+const createToken = (userId) => {
+  return jwt.sign({ id: userId }, process.env.JWT_ACCESS_SECRET, {
+    algorithm: "HS256",
+    allowInsecureKeySizes: true,
+    expiresIn: 3600,
+  });
+};
+
+export const signup = async (req, res) => {
   try {
-    let { email, password, isBB, firstName, lastName, lehrjahr } = req.body;
+    const { username, email, password, roles: requestedRoles } = req.body;
 
-    // Normalisiere E-Mail für deutsche Umlaute
-    email = normalizeGermanEmail(email);
-
-    // Prüfe ob User bereits existiert
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        message: "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits",
-      });
-    }
-
-    // Erstelle neuen User
-    const user = new User({
+    const user = new db.user({
+      username,
       email,
-      password,
-      firstName: firstName?.trim(),
-      lastName: lastName?.trim(),
-      isBB: isBB || false,
-      lehrjahr,
+      password: bcrypt.hashSync(password, 8),
     });
 
-    await user.save();
+    const savedUser = await user.save();
 
-    // Generiere Tokens
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+    let roles;
 
-    // Setze Refresh Token als HTTP-Only Cookie
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Tage
-    });
+    if (requestedRoles && requestedRoles.length > 0) {
+      roles = await db.role.find({ name: { $in: requestedRoles } });
+    } else {
+      const defaultRole = await db.role.findOne({ name: "user" });
+      roles = [defaultRole];
+    }
+    if (!roles || roles.lenght === 0) {
+      return handleError(res, new Error("Roles not found", 404));
+    }
 
-    // Entferne Passwort aus Response (automatisch durch toJSON)
-    const userResponse = user.toJSON();
-
-    res.status(201).json({
-      message: "Benutzer erfolgreich registriert",
-      user: userResponse,
-      accessToken,
-    });
+    const result = await saveUserWithRoles(savedUser, roles);
+    res.status(201).send(result);
   } catch (error) {
-    console.error("Registrierungsfehler:", error);
-
-    // Spezifische Fehlerbehandlung für Validierungsfehler
-    if (error.name === "ValidationError") {
-      const validationErrors = Object.values(error.errors).map((err) => ({
-        field: err.path,
-        message: err.message,
-      }));
-
-      return res.status(400).json({
-        message: "Validierungsfehler",
-        errors: validationErrors,
-      });
-    }
-
-    // MongoDB Duplicate Key Error
-    if (error.code === 11000) {
-      return res.status(400).json({
-        message: "Ein Benutzer mit dieser E-Mail-Adresse existiert bereits",
-      });
-    }
-
-    return res.status(500).json({
-      message: "Interner Serverfehler bei der Registrierung",
-    });
+    handleError(res, error);
   }
 };
 
-export const login = async (req, res) => {
+export const signin = async (req, res) => {
   try {
-    let { email, password } = req.body;
+    const { username, password } = req.body;
 
-    // Validiere Input
-    if (!email || !password) {
-      return res.status(400).json({
-        message: "E-Mail und Passwort sind erforderlich",
-        code: "MISSING_CREDENTIALS",
-      });
-    }
-
-    // Normalisiere E-Mail (falls diese Funktion existiert)
-    if (typeof normalizeGermanEmail === "function") {
-      email = normalizeGermanEmail(email);
-    }
-
-    // User finden (case-insensitive)
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(401).json({
-        message: "Ungültige E-Mail-Adresse oder Passwort",
-        code: "INVALID_CREDENTIALS",
-      });
-    }
-
-    // Passwort prüfen
-    const isValidPassword = await user.comparePassword(password);
-    if (!isValidPassword) {
-      return res.status(401).json({
-        message: "Ungültige E-Mail-Adresse oder Passwort",
-        code: "INVALID_CREDENTIALS",
-      });
-    }
-
-    // Tokens generieren
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
-
-    // Refresh Token als Cookie setzen
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Tage
-    });
-
-    // User-Daten ohne Passwort zurückgeben (automatisch durch toJSON)
-    const userResponse = user.toJSON();
-
-    res.json({
-      message: "Erfolgreich angemeldet",
-      user: userResponse,
-      accessToken,
-    });
-  } catch (error) {
-    console.error("Login-Fehler:", error);
-    res.status(500).json({
-      message: "Interner Serverfehler beim Login",
-      code: "INTERNAL_SERVER_ERROR",
-    });
-  }
-};
-
-export const refreshToken = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
-      // Wichtig: Cookie explizit löschen wenn kein Token vorhanden
-      res.clearCookie("refreshToken", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-      });
-
-      return res.status(401).json({
-        message: "Refresh Token fehlt",
-        code: "NO_REFRESH_TOKEN",
-      });
-    }
-
-    // Refresh Token verifizieren
-    const decoded = verifyRefreshToken(refreshToken);
-    const user = await User.findById(decoded.userId);
+    const user = await db.user.findOne({ username }).populate("roles", "-__v");
 
     if (!user) {
-      // Cookie löschen bei ungültigem User
-      res.clearCookie("refreshToken", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-      });
-
-      return res.status(401).json({
-        message: "Benutzer nicht gefunden",
-        code: "USER_NOT_FOUND",
-      });
+      return res.status(404).send({ message: "User not found." });
     }
 
-    // Neuen Access Token generieren
-    const newAccessToken = generateAccessToken(user._id);
+    const passwordIsValid = bcrypt.compareSync(password, user.password);
 
-    res.json({
-      accessToken: newAccessToken,
-      message: "Token erfolgreich erneuert",
+    if (!passwordIsValid) {
+      return res.status(401).send({ message: "Invalid Password" });
+    }
+
+    const token = createToken(user.id);
+
+    const authorities = user.roles.map(
+      (role) => `ROLE_${role.name.toUpperCase()}`
+    );
+
+    req.session.token = token;
+
+    res.status(200).send({
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      roles: authorities,
     });
   } catch (error) {
-    console.error("Refresh Token Fehler:", error);
-
-    // Cookie löschen bei JEDEM Fehler
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    });
-
-    // Spezifische Error Codes für besseres Debugging
-    let errorCode = "INVALID_REFRESH_TOKEN";
-    let errorMessage = "Ungültiger oder abgelaufener Refresh Token";
-
-    if (error.name === "TokenExpiredError") {
-      errorCode = "REFRESH_TOKEN_EXPIRED";
-      errorMessage = "Refresh Token ist abgelaufen";
-    } else if (error.name === "JsonWebTokenError") {
-      errorCode = "INVALID_REFRESH_TOKEN";
-      errorMessage = "Ungültiger Refresh Token";
-    }
-
-    res.status(401).json({
-      message: errorMessage,
-      code: errorCode,
-    });
+    handleError(res, error);
   }
 };
 
-export const logout = async (_, res) => {
+export const signout = async (req, res) => {
   try {
-    // Refresh Token Cookie löschen
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-    });
-
-    res.json({
-      message: "Erfolgreich abgemeldet",
-    });
+    req.session = null;
+    res.status(200).send({ message: "You've been signed out!" });
   } catch (error) {
-    console.error("Logout-Fehler:", error);
-    res.status(500).json({
-      message: "Fehler beim Abmelden",
-    });
-  }
-};
-
-export const getCurrentUser = async (req, res) => {
-  try {
-    // User ist bereits durch authenticate middleware verfügbar
-    const user = await User.findById(req.user._id).populate({
-      path: "completedModules.module",
-      populate: {
-        path: "competencies",
-        model: "Competency",
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        message: "Benutzer nicht gefunden",
-      });
-    }
-
-    // Passwort wird automatisch durch toJSON entfernt
-    res.json(user.toJSON());
-  } catch (error) {
-    console.error("Fehler beim Abrufen des aktuellen Benutzers:", error);
-    res.status(500).json({
-      message: "Fehler beim Abrufen der Benutzerdaten",
-    });
+    handleError(res, error);
   }
 };
