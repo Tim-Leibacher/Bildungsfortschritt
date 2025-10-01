@@ -2,89 +2,103 @@ import db from "../models/index.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 
-const handleError = (res, error, statusCode = 500) => {
-  return res.status(statusCode).send({ message: error.message || error });
-};
+const User = db.user;
+const Role = db.role;
 
-const createToken = (userId) => {
-  return jwt.sign({ id: userId }, process.env.JWT_ACCESS_SECRET, {
-    algorithm: "HS256",
-    allowInsecureKeySizes: true,
-    expiresIn: 3600,
-  });
-};
-
-export const signup = async (req, res) => {
+export const register = async (req, res) => {
   try {
-    const { username, email, password, roles: requestedRoles } = req.body;
+    // Create new user
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+    const userData = {
+      email: req.body.email,
+      password: hashedPassword,
+    };
 
-    const user = new db.user({
-      username,
-      email,
-      password: bcrypt.hashSync(password, 8),
-    });
+    // Add coach if provided
+    if (req.body.coachId) {
+      // Verify coach exists and is a BB
+      const coach = await User.findByPk(req.body.coachId);
+      if (!coach) {
+        return res.status(400).json({ message: "Coach not found" });
+      }
 
-    const savedUser = await user.save();
+      const coachRoles = await coach.getRoles();
+      const isBB = coachRoles.some(role => role.name === "bb");
+      if (!isBB) {
+        return res.status(400).json({ message: "Selected coach is not a Berufsbildner" });
+      }
 
-    let roles;
-
-    if (requestedRoles && requestedRoles.length > 0) {
-      roles = await db.role.find({ name: { $in: requestedRoles } });
-    } else {
-      const defaultRole = await db.role.findOne({ name: "user" });
-      roles = [defaultRole];
+      userData.coach_id = req.body.coachId;
     }
-    if (!roles || roles.lenght === 0) {
-      return handleError(res, new Error("Roles not found", 404));
-    }
 
-    const result = await saveUserWithRoles(savedUser, roles);
-    res.status(201).send(result);
+    const user = await User.create(userData);
+
+    // Neue Benutzer sind standardmäßig Lernende (keine explizite Rolle)
+    // await user.setRoles([]);  // Nicht nötig, da bereits leer
+
+    res.status(201).json({ message: "User registered successfully!" });
   } catch (error) {
-    handleError(res, error);
+    res.status(500).json({ message: error.message });
   }
 };
 
-export const signin = async (req, res) => {
+export const login = async (req, res) => {
   try {
-    const { username, password } = req.body;
-
-    const user = await db.user.findOne({ username }).populate("roles", "-__v");
+    // Find user by username
+    const user = await User.findOne({
+      where: {
+        email: req.body.email,
+      },
+    });
 
     if (!user) {
-      return res.status(404).send({ message: "User not found." });
+      return res.status(404).json({ message: "User Not found." });
     }
 
-    const passwordIsValid = bcrypt.compareSync(password, user.password);
-
-    if (!passwordIsValid) {
-      return res.status(401).send({ message: "Invalid Password" });
-    }
-
-    const token = createToken(user.id);
-
-    const authorities = user.roles.map(
-      (role) => `ROLE_${role.name.toUpperCase()}`
+    // Validate password
+    const passwordIsValid = await bcrypt.compare(
+      req.body.password,
+      user.password
     );
 
-    req.session.token = token;
+    if (!passwordIsValid) {
+      return res.status(401).json({
+        accessToken: null,
+        message: "Invalid Login!",
+      });
+    }
 
-    res.status(200).send({
-      id: user._id,
+    // Get user roles
+    const roles = await user.getRoles();
+    const authorities = roles.map((role) => `ROLE_${role.name.toUpperCase()}`);
+    const roleNames = roles.map((role) => role.name);
+
+    // Generate JWT with roles
+    const token = jwt.sign({
+      id: user.id,
+      roles: roleNames
+    }, process.env.JWT_ACCESS_SECRET, {
+      expiresIn: process.env.JWT_ACCESS_EXPIRY || "24h",
+    });
+
+    res.status(200).json({
+      id: user.id,
       username: user.username,
       email: user.email,
       roles: authorities,
+      accessToken: token,
     });
   } catch (error) {
-    handleError(res, error);
+    res.status(500).json({ message: error.message });
   }
 };
 
-export const signout = async (req, res) => {
-  try {
-    req.session = null;
-    res.status(200).send({ message: "You've been signed out!" });
-  } catch (error) {
-    handleError(res, error);
-  }
+// TODO: Implement password update functionality when needed
+// export const updatePassword = async (req, res) => {
+//   // Implement proper password update with validation
+// };
+
+export const logout = (req, res) => {
+  req.session = null;
+  res.status(200).json({ message: "Logged out successfully!" });
 };

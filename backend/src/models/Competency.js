@@ -1,34 +1,37 @@
-import mongoose from "mongoose";
-
-const compentencySchema = new mongoose.Schema(
-  {
+export default (sequelize, DataTypes) => {
+  const Competency = sequelize.define("competencies", {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
     code: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
       unique: true,
     },
     title: {
-      type: String,
-      required: true,
+      type: DataTypes.STRING,
+      allowNull: false,
     },
     description: {
-      type: String,
-      required: true,
+      type: DataTypes.TEXT,
+      allowNull: false,
     },
     area: {
-      type: String,
-      required: true,
-      enum: ["a", "b", "c", "d", "e", "f", "g", "h"],
+      type: DataTypes.ENUM("a", "b", "c", "d", "e", "f", "g", "h"),
+      allowNull: false,
+      validate: {
+        isIn: [["a", "b", "c", "d", "e", "f", "g", "h"]],
+      },
     },
-    taxonomy: {
-      type: String,
-      required: true,
-      enum: ["K1", "K2", "K3", "K4", "K5", "K6"],
+    areaTitle: {
+      type: DataTypes.STRING,
+      allowNull: false,
     },
-  },
-  { timestamps: true }
-);
+  }, {
+    timestamps: true,
+  });
 
-const Competency = mongoose.model("Competency", compentencySchema);
-
-export default Competency;
+  return Competency;
+};

@@ -1,19 +1,60 @@
-import Compentency from "../models/Competency.js";
+// ============================================================================
+// COMPETENCY CONTROLLER - PostgreSQL/Sequelize Version
+// ============================================================================
 
-export const getAllCompentencies = async (req, res) => {
+// TODO: Implement proper Sequelize versions when competency system is developed
+
+// export const getAllCompetencies = async (req, res) => {
+//   try {
+//     const db = (await import("../models/index.js")).default;
+//     const competencies = await db.competency.findAll({
+//       order: [["area", "ASC"], ["code", "ASC"]]
+//     });
+//     res.status(200).json(competencies);
+//   } catch (error) {
+//     console.error("Error fetching competencies:", error);
+//     res.status(500).json({ message: "Error fetching competencies" });
+//   }
+// };
+
+// export const getCompetenciesByArea = async (req, res) => {
+//   try {
+//     const { area } = req.params;
+//     const db = (await import("../models/index.js")).default;
+//     const competencies = await db.competency.findAll({
+//       where: { area },
+//       order: [["code", "ASC"]]
+//     });
+//     res.status(200).json(competencies);
+//   } catch (error) {
+//     console.error("Error fetching competencies by area:", error);
+//     res.status(500).json({ message: "Error fetching competencies by area" });
+//   }
+// };
+
+export const getAllCompetencies = async (req, res) => {
   try {
-    const compentencies = await Compentency.find().sort({ area: 1, code: 1 });
-    res.status(200).json(compentencies);
+    const db = (await import("../models/index.js")).default;
+    const competencies = await db.competency.findAll({
+      order: [["area", "ASC"], ["code", "ASC"]]
+    });
+
+    res.status(200).json(competencies);
   } catch (error) {
-    console.error("Error fetching compentencies:", error);
-    res.status(500).json({ message: "Server Error" });
+    console.error("Error fetching competencies:", error);
+    res.status(500).json({ message: "Error fetching competencies" });
   }
 };
 
 export const getCompetenciesByArea = async (req, res) => {
   try {
     const { area } = req.params;
-    const competencies = await Compentency.find({ area }).sort({ code: 1 });
+    const db = (await import("../models/index.js")).default;
+    const competencies = await db.competency.findAll({
+      where: { area },
+      order: [["code", "ASC"]]
+    });
+
     res.status(200).json(competencies);
   } catch (error) {
     console.error("Error fetching competencies by area:", error);
@@ -21,18 +62,6 @@ export const getCompetenciesByArea = async (req, res) => {
   }
 };
 
-export const createCompetency = async (req, res) => {
-  try {
-    const { code, description, area } = req.body;
-    if (!code || !description || !area) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
-
-    const newCompetency = new Compentency({ code, description, area });
-    await newCompetency.save();
-    res.status(201).json(newCompetency);
-  } catch (error) {
-    console.error("Error creating competency:", error);
-    res.status(500).json({ message: "Error creating competency" });
-  }
+export const createCompetency = (req, res) => {
+  res.status(501).json({ message: "Competency creation not yet implemented" });
 };

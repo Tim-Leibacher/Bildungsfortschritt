@@ -1,32 +1,40 @@
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
-import Role from "../models/Role.js";
+import db from "../models/index.js";
 
-const verifyToken = (req, res, next) => {
-  let token = req.session.token;
+const User = db.user;
+const Role = db.role;
 
-  if (!token) return res.status(403).send({ message: "No token provided!" });
+export const verifyToken = (req, res, next) => {
+  const token = req.headers["x-access-token"] || req.headers["authorization"];
 
-  jwt.verify(token, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
+  if (!token) {
+    console.log("❌ No token provided");
+    return res.status(403).json({ message: "No token provided!" });
+  }
+
+  const actualToken = token.startsWith("Bearer ")
+    ? token.slice(7, token.length)
+    : token;
+
+  jwt.verify(actualToken, process.env.JWT_ACCESS_SECRET, (err, decoded) => {
     if (err) {
-      return res.status(401).send({
-        message: "Unauthorized!", //TODO Unauthorized Site
-      });
+      console.log("❌ JWT verification failed:", err.message);
+      return res.status(401).json({ message: "Unauthorized!" });
     }
-
-    req.userId = decoded.id;
+    req.user = { id: decoded.id };
+    console.log("✅ Token verified for user ID:", decoded.id);
     next();
   });
 };
 
 export const checkUserRole = async (req, res, next, requiredRole) => {
   try {
-    const user = await User.findById(req.userId);
+    const user = await User.findByPk(req.user.id);
     if (!user) {
       return res.status(404).send({ message: "User not found" });
     }
 
-    const roles = await Role.find({ _id: { $in: user.roles } });
+    const roles = await user.getRoles();
     const hasRequiredRole = roles.some((role) => role.name === requiredRole);
 
     if (hasRequiredRole) {
@@ -39,14 +47,32 @@ export const checkUserRole = async (req, res, next, requiredRole) => {
   }
 };
 
-export const isAdmin = (req, res, next) =>
-  checkUserRole(req, res, next, "admin");
-export const isModerator = (req, res, next) =>
-  checkUserRole(req, res, next, "moderator");
+export const isBB = (req, res, next) => checkUserRole(req, res, next, "bb");
+
+// Helper function to check if user is a Lernender (has no roles)
+export const isLernender = async (req, res, next) => {
+  try {
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+
+    const roles = await user.getRoles();
+    const hasNoRoles = roles.length === 0;
+
+    if (hasNoRoles) {
+      next();
+    } else {
+      res.status(403).send({ message: "Lernender access required" });
+    }
+  } catch (error) {
+    res.status(500).send({ message: error.message });
+  }
+};
 
 export default {
   verifyToken,
   checkUserRole,
-  isAdmin,
-  isModerator,
+  isBB,
+  isLernender,
 };

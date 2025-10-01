@@ -1,30 +1,30 @@
 import express from "express";
-import authJwt from "../middleware/authJwt.js";
 import {
-  getAllUsers,
-  getUserById,
-  createUser,
-  getAllUsersFromBB,
-  getCurrentUser,
-  markModuleAsCompleted,
-  unmarkModuleAsCompleted,
-  getUserProgress,
+  allAccess,
+  userBoard,
+  bbBoard,
+  getAllBBs,
+  getAllStudents,
+  getMyStudents,
 } from "../controllers/userController.js";
+import { authJwt } from "../middleware/index.js";
 
 const router = express.Router();
 
-// Spezifische Routen MÜSSEN vor parametrischen Routen stehen
-router.get("/", [authJwt.verifyToken], getAllUsers);
-router.get("/me", getCurrentUser);
-router.get("/bb/users", getAllUsersFromBB); // Nur für Berufsbildner
-router.get("/progress/:id?", getUserProgress); // MUSS vor /:id stehen
-router.post("/complete-module", markModuleAsCompleted);
-router.post("/uncomplete-module", unmarkModuleAsCompleted);
+// Public Route
+router.get("/all", allAccess);
 
-// Allgemeine parametrische Route am Ende
-router.get("/:id", getUserById);
-router.post("/", createUser);
-//TODO: Implement updateUser
-//TODO: Implement deleteUser
+// Public Route für BB-Liste (für Registrierung)
+router.get("/bbs", getAllBBs);
+
+// User Route
+router.get("/user", [authJwt.verifyToken], userBoard);
+
+// Berufsbildner Route (ersetzt Moderator)
+router.get("/bb", [authJwt.verifyToken, authJwt.isBB], bbBoard);
+
+// Student Routes für BBs
+router.get("/students/all", [authJwt.verifyToken, authJwt.isBB], getAllStudents);
+router.get("/students/mine", [authJwt.verifyToken, authJwt.isBB], getMyStudents);
 
 export default router;

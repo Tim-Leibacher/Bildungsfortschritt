@@ -1,11 +1,16 @@
+export default (sequelize, DataTypes) => {
+  const Role = sequelize.define("roles", {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true,
+    },
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+    },
+  });
 
-import mongoose from "mongoose";
-
-const Role = mongoose.model(
-  "Role",
-  new mongoose.Schema({
-    name: String
-  })
-);
-
-export default Role;
+  return Role;
+};

@@ -1,22 +1,26 @@
-import { verifySignup } from "../middleware/verifySignUp.js";
-import * as authController from "../controllers/authController.js";
+// app/routes/auth.routes.js
+import express from "express";
+import { register, login, logout } from "../controllers/authController.js";
+import { verifyRegister } from "../middleware/index.js";
 
-export default function setupAuthRoutes(app) {
-  app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept");
-    next();
-  });
+const router = express.Router();
 
-  app.post(
-    "/auth/signup",
-    [
-      verifySignup.checkDuplicateUsernameOrEmail,
-      verifySignup.checkRolesExisted,
-    ],
-    authController.signup
-  );
+// Register Route
+router.post(
+  "/register",
+  [
+    verifyRegister.checkDuplicateUsernameOrEmail,
+    verifyRegister.checkRolesExisted,
+  ],
+  register
+);
 
-  app.post("/auth/signin", authController.signin);
+// Signin Route
+router.post("/signin", login);
 
-  app.post("/auth/signout", authController.signout);
-}
+// TODO: Implement password update when needed
+// router.post("/update", verifyToken, updatePassword);
+
+router.get("/logout", logout);
+
+export default router;
